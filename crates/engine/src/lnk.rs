@@ -97,24 +97,31 @@ const LOLBINS: &[&str] = &[
     "certutil.exe", "bitsadmin.exe", "msiexec.exe", "forfiles.exe", "conhost.exe", "curl.exe", "schtasks.exe", "wmic.exe",
 ];
 
-const BAD_ARGS: &[&str] = &[
-    "-enc", "-encodedcommand", "frombase64string", "downloadstring", "downloadfile", "invoke-webrequest", "iwr ", "iex",
-    "invoke-expression", "http://", "https://", "hidden", "bypass", "start-bitstransfer", "javascript:", "vbscript:",
-    "-urlcache", ".hta", "\\\\", "%temp%", "appdata", "net.webclient", "-nop",
+/// One of these is enough: they download, decode, run hidden or run script from a URL.
+const STRONG_ARGS: &[&str] = &[
+    "-enc ", "-encodedcommand", "frombase64string", "downloadstring", "downloadfile", "invoke-webrequest", "iwr ", "iex(", "iex ",
+    "| iex", "|iex", "invoke-expression", "start-bitstransfer", "javascript:", "vbscript:", "-urlcache", ".hta", "net.webclient",
+    "-w hidden", "-windowstyle hidden", "-window hidden", "-w 1 ",
 ];
+/// Common in legitimate shortcuts too (Anaconda's PowerShell prompt uses `-ExecutionPolicy ByPass`),
+/// so it takes two of them.
+const WEAK_ARGS: &[&str] = &["bypass", "-nop", "http://", "https://", "\\\\", "%temp%", "appdata", "hidden"];
 
 pub fn checks(data: &[u8]) -> Vec<Detection> {
     let mut out = Vec::new();
     let Some(info) = parse(data) else { return out };
     let exe = info.target.rsplit(['\\', '/']).next().unwrap_or("").to_ascii_lowercase();
-    let args = info.arguments.to_ascii_lowercase();
+    // Trailing space lets "-enc " match at the very end of the arguments too.
+    let args = format!("{} ", info.arguments.to_ascii_lowercase());
     let lolbin = LOLBINS.contains(&exe.as_str());
-    let hits: Vec<&str> = BAD_ARGS.iter().copied().filter(|t| args.contains(t)).collect();
+    let strong: Vec<&str> = STRONG_ARGS.iter().copied().filter(|t| args.contains(t)).collect();
+    let weak: Vec<&str> = WEAK_ARGS.iter().copied().filter(|t| args.contains(t)).collect();
+    let hits: Vec<&str> = strong.iter().chain(weak.iter()).copied().collect();
     let padded = info.arguments.contains(&" ".repeat(64));
-    if lolbin && (!hits.is_empty() || padded) {
+    if lolbin && (!strong.is_empty() || weak.len() >= 2 || padded) {
         out.push(Detection::new(
             "Suspicious/Win.LnkDropper!a",
-            if hits.len() >= 2 || padded { Severity::High } else { Severity::Medium },
+            if strong.len() >= 2 || padded { Severity::High } else { Severity::Medium },
             Source::Heuristic,
             format!(
                 "This shortcut runs {exe} with hidden instructions ({}). Shortcuts like this are a common way to download and start malware.",
@@ -167,6 +174,11 @@ pub(crate) mod tests {
         assert!(checks(&lnk(r"C:\Program Files\Mozilla Firefox\firefox.exe", "")).is_empty());
         assert!(checks(&lnk(r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe", "")).is_empty());
         assert!(checks(&lnk(r"C:\Windows\System32\notepad.exe", r"C:\notes.txt")).is_empty());
+        // Found by CI on GitHub's runner: Anaconda's own Start-menu shortcut.
+        let conda = r#"-ExecutionPolicy ByPass -NoExit -Command "& 'C:\ProgramData\miniconda3\shell\condabin\conda-hook.ps1' ; conda activate 'C:\ProgramData\miniconda3' ""#;
+        assert!(checks(&lnk(r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe", conda)).is_empty());
+        assert!(checks(&lnk(r"C:\Windows\System32\cmd.exe", "/c start https://docs.example.org/help")).is_empty());
+        assert!(checks(&lnk(r"C:\Program Files\Internet Explorer\iexplore.exe", "")).is_empty());
     }
 
     #[test]

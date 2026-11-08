@@ -30,7 +30,7 @@ const FETCH: &[&str] = &[
     "xmlhttprequest", "adodb.stream",
 ];
 const RUN: &[&str] = &[
-    "iex", "invoke-expression", "start-process", "rundll32", "regsvr32", "mshta", ".run(", ".run ", ".exec(", "shellexecute",
+    "iex(", "iex ", "| iex", "|iex", "invoke-expression", "start-process", "rundll32", "regsvr32", "mshta", ".run(", ".run ", ".exec(", "shellexecute",
     "wscript.shell", "shell.application", "cmd /c", "cmd.exe /c", "powershell", ".exe",
 ];
 

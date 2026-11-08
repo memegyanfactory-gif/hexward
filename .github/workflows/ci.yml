@@ -21,6 +21,17 @@ jobs:
       - name: Rust toolchain
         shell: bash
         run: rustup toolchain install stable --profile minimal --component clippy && rustup default stable
+      - name: Cache Rust build
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: rust-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: rust-${{ runner.os }}-
+
       - name: Test
         run: cargo test --workspace --locked
       - name: Lint
