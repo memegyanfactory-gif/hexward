@@ -92,6 +92,19 @@ pub fn run(st: &mut State, ui: &AppWindow) {
                     note.push_str(&format!(" ({})", o.errors.join("; ")));
                 }
                 hexward_update::online::apply(&mut report, &o);
+                // Opt-in supply-chain reports: only the malicious package's name and version.
+                if crate::shields::CLOUD_REPORTS.load(std::sync::atomic::Ordering::Relaxed) {
+                    for (p, id, _) in &o.malicious {
+                        let r = hexward_update::cloud::Report {
+                            kind: hexward_update::cloud::Kind::SupplyChain,
+                            sha256: None,
+                            name: format!("{}:{}@{}", p.ecosystem, p.name, p.version),
+                            detection: format!("Known malware ({id})"),
+                            signer: None,
+                        };
+                        let _ = hexward_update::cloud::send_report(&r);
+                    }
+                }
             }
             if let Some(t) = temp {
                 let _ = std::fs::remove_dir_all(t);

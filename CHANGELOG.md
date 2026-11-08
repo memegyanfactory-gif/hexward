@@ -2,8 +2,15 @@
 
 Each `## version` section becomes the release notes and the first line shows in the app's update banner.
 
-## 0.4.0
+## 0.5.0
 
+- Ransomware rollback: Hexward keeps a private copy of your documents and photos, and Settings › Document backup › Restore puts back files ransomware damaged, renamed or removed (`hexward restore-files`)
+- Opt-in cloud, all off until you turn it on: reputation lookups that send only 6 of 64 hash characters, signer reputation, detection and false-alarm reports, and "Send to lab" on results
+- Community database: confirmed submissions now reach every install with the rule update
+- Inno Setup installers are unpacked (setup commands, script, and the programs inside)
+- Weekly known-good check of every malware hash Hexward ships (CIRCL hashlookup, which includes the NSRL)
+- Fixed: the project audit no longer mistakes split-up test samples for private keys in git history
+- Also in this release (0.4.0 was never published):
 - Ransomware shield: hidden decoy files, bulk rename and encryption detection, backup-deletion blocking
 - Memory scan: checks the memory of running programs for unpacked and injected code (Tasks › Scan memory)
 - Project audits now spot odd dependency releases: a new install script, a 10× size jump, a huge version jump, or a release with no git commit

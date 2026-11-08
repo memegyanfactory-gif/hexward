@@ -25,6 +25,7 @@ There is no account, no telemetry, no analytics, no advertising and no tracking.
 | Rule packs | GitHub (Hexward's rule channel, YARA Forge) | when you update rules | an ordinary web request |
 | Known-malware hashes | abuse.ch (MalwareBazaar) | when you update rules, only if you set an Auth-Key | your Auth-Key, which abuse.ch requires |
 | Driver blocklists | loldrivers.io, Microsoft | when you update rules | an ordinary web request |
+| Community hashes | hexward.onurilabs.com | when you update rules | an ordinary web request |
 | Script shield component | GitHub | once, when you turn the script shield on | an ordinary web request |
 
 ## What Hexward sends, only when you ask
@@ -35,10 +36,25 @@ There is no account, no telemetry, no analytics, no advertising and no tracking.
 - **Submitting a sample** on hexward.onurilabs.com: the file you choose and your optional note. See the
   website for how samples are stored (encrypted, reviewed by a person, never shared).
 
-## Future cloud features
+## Cloud features (opt-in, all off by default)
 
-Planned cloud features (reputation lookups, detection reports) will be separate opt-in switches, send
-only hash prefixes where possible, and have a published retention period before they ship.
+Three switches in Settings › Cloud. Nothing below happens until you turn the switch on.
+
+| Switch | What is sent | Where | What is kept, and for how long |
+|---|---|---|---|
+| Cloud reputation | the first 6 of the 64 hex characters of a program's or script's SHA-256 | hexward.onurilabs.com | a count of lookups per day; no prefix, no address |
+| Send detection reports | the file's name (never its folder), its SHA-256, the detection name, the Hexward version, a random install number | hexward.onurilabs.com | the report, 90 days, then deleted; only a hash of the install number |
+| (same switch) Allow on a result | the same, marked as a false alarm | hexward.onurilabs.com | 90 days; a confirmed false alarm joins the community allow list (hash and file name only) |
+| (same switch) Project audit, Check online | the name and version of a malicious package the audit found | hexward.onurilabs.com | 90 days |
+| Send samples to the lab | the file, only when you click Send to lab on a result | hexward.onurilabs.com | encrypted until a person has reviewed it |
+
+How the reputation lookup stays private: the server answers with every known-bad and allow-listed
+hash that starts with those 6 characters (out of about 16 million possible starts), and Hexward
+compares the full hash on your PC. The server never learns which file you have.
+
+Your network address is never stored with a report. The rule update also downloads the confirmed
+community hashes (an ordinary download; nothing is sent). The live numbers, and every request for
+user data we ever receive, are on https://hexward.onurilabs.com/transparency.
 
 ## Contact
 

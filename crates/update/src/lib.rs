@@ -11,6 +11,7 @@
 
 pub mod app;
 pub mod channel;
+pub mod cloud;
 pub mod online;
 
 use std::collections::BTreeMap;
@@ -104,6 +105,8 @@ pub struct Report {
     pub yara_forge: Step,
     pub malwarebazaar: Step,
     pub drivers: Step,
+    /// Confirmed community submissions from hexward.onurilabs.com.
+    pub community: Step,
 }
 
 #[derive(Serialize)]
@@ -268,7 +271,11 @@ pub fn run(pack: ForgePack, force: bool) -> Result<Report> {
         Ok(n) => Step::Updated { detail: format!("{n} vulnerable or malicious drivers (LOLDrivers, Microsoft blocklist)") },
         Err(e) => Step::Failed { reason: format!("{e:#}") },
     };
-    Ok(Report { rules_dir: dir, yara_forge, malwarebazaar, drivers })
+    let community = match cloud::update_community(&dir) {
+        Ok(n) => Step::Updated { detail: format!("{n} confirmed community hashes") },
+        Err(e) => Step::Failed { reason: format!("{e:#}") },
+    };
+    Ok(Report { rules_dir: dir, yara_forge, malwarebazaar, drivers, community })
 }
 
 /// LOLDrivers and Microsoft's vulnerable driver blocklist → rules/drivers.json.

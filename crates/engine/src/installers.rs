@@ -4,8 +4,10 @@
 //! - PyInstaller programs: the bundled archive (scripts, libraries, data) is unpacked
 //! - UPX-packed programs: the packed code is decompressed (NRV2B/2D/2E, LZMA), so rules see the
 //!   real program instead of the packer stub
-//! - Inno Setup installers are recognized; their data format changes with every Inno version,
-//!   so it isn't unpacked yet
+//! - Inno Setup installers, best effort: the setup header (the [Run] commands and the compiled
+//!   [Code] script) and the compressed file chunks ("zlb\x1a", LZMA, LZMA2 or zlib) are
+//!   decompressed, and the programs inside are carved out. Inno's exact file table changes with
+//!   every version, so files are found by their own headers rather than by name
 //!
 //! Unpacked data is only scanned, never run. Everything is capped by the container budget.
 
@@ -101,11 +103,141 @@ pub fn unpack(d: &[u8], k: &str, b: &mut Budget, ex: &mut Expansion) -> bool {
         "NSIS installer" => nsis(d, b, ex),
         "PyInstaller program" => pyinstaller(d, b, ex),
         "UPX-packed program" => upx(d, b, ex),
+        "Inno Setup installer" => inno(d, b, ex),
         _ => {
             ex.notes.push(Note::Listed { entry: format!("{k} (contents not unpacked)") });
             true
         }
     }
+}
+
+// ---------- Inno Setup ----------
+
+/// Most one Inno stream may expand to.
+const INNO_CAP: usize = 128 * 1024 * 1024;
+
+fn read_capped(mut r: impl Read, cap: usize) -> Vec<u8> {
+    let mut out = Vec::new();
+    let mut buf = [0u8; 64 * 1024];
+    while out.len() < cap {
+        match r.read(&mut buf) {
+            Ok(0) | Err(_) => break,
+            Ok(n) => out.extend_from_slice(&buf[..n]),
+        }
+    }
+    out
+}
+
+/// LZMA as Inno writes it: a properties byte and a 32-bit dictionary size, then the raw stream.
+fn lzma1(c: &[u8], cap: usize) -> Option<Vec<u8>> {
+    if c.len() < 6 || c[0] >= 225 {
+        return None;
+    }
+    let dict = u32le(c, 1)?.clamp(4096, 1 << 28);
+    let mut r = lzma_rust2::LzmaReader::new_with_props(&c[5..], u64::MAX, c[0], dict, None).ok()?;
+    r.set_relaxed_end_condition(true);
+    let out = read_capped(r, cap);
+    (!out.is_empty()).then_some(out)
+}
+
+/// LZMA2 as Inno writes it: one dictionary-size byte, then LZMA2 chunks.
+fn lzma2(c: &[u8], cap: usize) -> Option<Vec<u8>> {
+    let p = *c.first()?;
+    if p > 40 {
+        return None;
+    }
+    let dict = if p == 40 { u32::MAX } else { (2 | (p as u32 & 1)) << (p / 2 + 11) };
+    let out = read_capped(lzma_rust2::Lzma2Reader::new(&c[1..], dict.min(1 << 28), None), cap);
+    (!out.is_empty()).then_some(out)
+}
+
+fn zlib(c: &[u8], cap: usize) -> Option<Vec<u8>> {
+    let out = read_capped(flate2::read::ZlibDecoder::new(c), cap);
+    (!out.is_empty()).then_some(out)
+}
+
+/// One compressed chunk of installed files, whatever method it uses.
+fn inno_chunk(c: &[u8], cap: usize) -> Option<Vec<u8>> {
+    match c.first()? {
+        0x78 => zlib(c, cap),
+        b'B' if c.starts_with(b"BZh") => Some(read_capped(bzip2::read::BzDecoder::new(c), cap)).filter(|o| !o.is_empty()),
+        p if *p <= 40 => lzma2(c, cap).or_else(|| lzma1(c, cap)),
+        _ => lzma1(c, cap),
+    }
+}
+
+/// A setup-header block: CRC, stored size, "compressed" flag, then the data in 4 KB pieces that
+/// each start with their own CRC. Returns the data and how many bytes the block took.
+fn inno_block(s: &[u8], cap: usize) -> Option<(Vec<u8>, usize)> {
+    // Inno 4.0.9 to 6.3 store a 32-bit size; 6.4 and later a 64-bit one.
+    for size_len in [4usize, 8] {
+        let stored = if size_len == 4 { u32le(s, 4)? as usize } else { u32le(s, 4)? as usize | (u32le(s, 8)? as usize) << 32 };
+        let Some(&flag) = s.get(4 + size_len) else { continue };
+        let start = 4 + size_len + 1;
+        if flag > 1 || stored < 5 || start + stored > s.len() {
+            continue;
+        }
+        let end = start + stored;
+        let mut raw = Vec::with_capacity(stored);
+        let mut o = start;
+        while o + 4 < end {
+            let n = (end - o - 4).min(4096);
+            raw.extend_from_slice(&s[o + 4..o + 4 + n]);
+            o += 4 + n;
+        }
+        let out = if flag == 1 { lzma1(&raw, cap).or_else(|| zlib(&raw, cap)) } else { Some(raw) };
+        if let Some(out) = out {
+            return Some((out, end));
+        }
+    }
+    None
+}
+
+fn inno(d: &[u8], b: &mut Budget, ex: &mut Expansion) -> bool {
+    let mut got = false;
+    // setup-0: the header (languages, [Run] and [Registry] entries, the compiled [Code] script),
+    // then the file location table.
+    if let Some(id) = find(&d[..d.len().min(64 * 1024 * 1024)], b"Inno Setup Setup Data (", 0) {
+        let mut pos = id + 64;
+        for n in 1..=2 {
+            let Some((data, used)) = d.get(pos..).and_then(|s| inno_block(s, INNO_CAP)) else { break };
+            got = true;
+            if !push(b, ex, format!("inno setup header {n}"), data) {
+                return true;
+            }
+            pos += used;
+        }
+    }
+    // setup-1: the files, in chunks that each start with "zlb\x1a".
+    let mut from = 0;
+    let mut chunks = 0;
+    let mut programs = 0;
+    while let Some(at) = find(d, b"zlb\x1a", from) {
+        from = at + 4;
+        let Some(data) = inno_chunk(&d[at + 4..], INNO_CAP).filter(|o| o.len() >= 16) else { continue };
+        chunks += 1;
+        got = true;
+        // Carve the programs out, so each is checked (and hash-matched) on its own.
+        let mut pos = 0;
+        while let Some(mz) = find(&data, b"MZ", pos) {
+            pos = mz + 2;
+            if let Some(size) = crate::formats::pe_size(&data, mz) {
+                let end = (mz + size).min(data.len());
+                programs += 1;
+                pos = end;
+                if !push(b, ex, format!("inno program {programs}.exe"), data[mz..end].to_vec()) || programs >= 256 {
+                    return true;
+                }
+            }
+        }
+        if !push(b, ex, format!("inno files {chunks}"), data) || chunks >= 64 {
+            return true;
+        }
+    }
+    if !got {
+        ex.notes.push(Note::Listed { entry: "Inno Setup installer (this version's data couldn't be unpacked)".into() });
+    }
+    true
 }
 
 // ---------- NSIS ----------
@@ -412,6 +544,74 @@ fn upx(d: &[u8], b: &mut Budget, ex: &mut Expansion) -> bool {
         _ => ex.notes.push(Note::Listed { entry: format!("UPX method {method} (not unpacked)") }),
     }
     true
+}
+
+#[cfg(test)]
+mod inno_tests {
+    use super::*;
+    use crate::container::{Budget, Expansion, Limits};
+    use std::io::Write;
+
+    fn zlib_bytes(data: &[u8]) -> Vec<u8> {
+        let mut e = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
+        e.write_all(data).unwrap();
+        e.finish().unwrap()
+    }
+
+    fn tiny_pe(marker: &[u8]) -> Vec<u8> {
+        let mut pe = vec![0u8; 0x400];
+        pe[0..2].copy_from_slice(b"MZ");
+        pe[0x3c..0x40].copy_from_slice(&0x80u32.to_le_bytes());
+        pe[0x80..0x84].copy_from_slice(b"PE\0\0");
+        pe[0x86..0x88].copy_from_slice(&1u16.to_le_bytes()); // one section
+        pe[0x94..0x96].copy_from_slice(&0xE0u16.to_le_bytes()); // optional header size
+        let sec = 0x80 + 24 + 0xE0;
+        pe[sec..sec + 5].copy_from_slice(b".text");
+        pe[sec + 16..sec + 20].copy_from_slice(&0x200u32.to_le_bytes()); // raw size
+        pe[sec + 20..sec + 24].copy_from_slice(&0x200u32.to_le_bytes()); // raw pointer
+        pe[0x200..0x200 + marker.len()].copy_from_slice(marker);
+        pe
+    }
+
+    #[test]
+    fn unpacks_header_and_file_chunks() {
+        // A loader stub, the setup ID and a stored header block, then a zlib file chunk holding a program.
+        let mut d = b"MZ fake loader".to_vec();
+        d.resize(0x1000, 0);
+        let mut id = b"Inno Setup Setup Data (6.2.0)".to_vec();
+        id.resize(64, 0);
+        d.extend_from_slice(&id);
+        let header = b"[Run] powershell -enc AAAA".to_vec();
+        let stored = 4 + header.len(); // one piece: CRC + data
+        d.extend_from_slice(&0u32.to_le_bytes()); // block CRC
+        d.extend_from_slice(&(stored as u32).to_le_bytes());
+        d.push(0); // not compressed
+        d.extend_from_slice(&0u32.to_le_bytes()); // piece CRC
+        d.extend_from_slice(&header);
+        d.extend_from_slice(b"padding");
+        let payload = [b"readme text ".to_vec(), tiny_pe(b"INNER-PROGRAM-MARKER"), b" trailing".to_vec()].concat();
+        d.extend_from_slice(b"zlb\x1a");
+        d.extend_from_slice(&zlib_bytes(&payload));
+
+        let mut b = Budget::new(Limits::default());
+        let mut ex = Expansion::default();
+        assert!(inno(&d, &mut b, &mut ex));
+        let names: Vec<&str> = ex.children.iter().map(|c| c.name.as_str()).collect();
+        assert!(names.contains(&"inno setup header 1"), "{names:?}");
+        assert_eq!(ex.children.iter().find(|c| c.name == "inno setup header 1").unwrap().data, header);
+        let prog = ex.children.iter().find(|c| c.name == "inno program 1.exe").expect("carved program");
+        assert!(prog.data.starts_with(b"MZ") && prog.data.windows(20).any(|w| w == b"INNER-PROGRAM-MARKER"));
+        assert!(names.contains(&"inno files 1"));
+    }
+
+    #[test]
+    fn garbage_is_listed_not_unpacked() {
+        let d = b"MZ.... InnoSetupLdrWindow ....".to_vec();
+        let mut b = Budget::new(Limits::default());
+        let mut ex = Expansion::default();
+        assert!(inno(&d, &mut b, &mut ex));
+        assert!(ex.children.is_empty());
+    }
 }
 
 #[cfg(test)]

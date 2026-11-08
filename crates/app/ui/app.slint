@@ -793,6 +793,10 @@ export component AppWindow inherits Window {
     in property <bool> quiet-mode: true;
     in property <bool> script-shield;
     in property <bool> ransomware-shield: true;
+    in property <bool> cloud-reputation: false;
+    in property <bool> cloud-reports: false;
+    in property <bool> cloud-samples: false;
+    in property <bool> document-backup: true;
     in property <bool> script-shield-busy;
     in property <bool> file-shield: true;
     in property <bool> process-shield: true;
@@ -870,6 +874,12 @@ export component AppWindow inherits Window {
     callback set-quiet-mode(bool);
     callback set-script-shield(bool);
     callback set-ransomware-shield(bool);
+    callback set-cloud-reputation(bool);
+    callback set-cloud-reports(bool);
+    callback set-cloud-samples(bool);
+    callback send-sample(int);
+    callback set-document-backup(bool);
+    callback restore-files();
     callback set-file-shield(bool);
     callback set-process-shield(bool);
     callback set-auto-quarantine(bool);
@@ -1358,6 +1368,7 @@ export component AppWindow inherits Window {
                                                 Btn { text: "Quarantine"; small: true; has-icon: true; icon: Assets.i-vault; clicked => { root.quarantine-one(i); } }
                                                 Btn { text: "Delete"; kind: "ghost"; small: true; has-icon: true; icon: Assets.i-trash; clicked => { root.ask-delete(i); } }
                                                 Btn { text: "Allow"; kind: "ghost"; small: true; has-icon: true; icon: Assets.i-check; clicked => { root.allow-one(i); } }
+                                                if root.cloud-samples: Btn { text: "Send to lab"; kind: "ghost"; small: true; clicked => { root.send-sample(i); } }
                                             }
                                             if !t.done && t.confirm-delete: HorizontalLayout {
                                                 padding-top: 6px;
@@ -1984,6 +1995,21 @@ export component AppWindow inherits Window {
                                 VerticalLayout {
                                     SettingRow { title: "Skip files larger than"; text: "Bigger files take longer and rarely carry malware."; Seg { options: ["32 MB", "64 MB", "128 MB", "256 MB"]; value: root.max-size-mb + " MB"; picked(o) => { root.set-max-size(o); } } }
                                     SettingRow { title: "Select suspicious files too"; text: "Off: only confirmed threats are pre-selected for quarantine. Suspicious files are listed so you decide."; last: true; Switch { checked: root.quarantine-suspicious; toggled(v) => { root.set-quarantine-suspicious(v); } } }
+                                }
+                            }
+                            Eyebrow { text: "DOCUMENT BACKUP"; }
+                            Panel {
+                                VerticalLayout {
+                                    SettingRow { title: "Back up documents and photos"; text: "A private copy of Documents, Desktop and Pictures (up to 2 GB, files up to 20 MB), on this PC only. A version that looks encrypted never replaces a good copy."; Switch { checked: root.document-backup; toggled(v) => { root.set-document-backup(v); } } }
+                                    SettingRow { title: "Restore files after ransomware"; text: "Puts back files that were damaged, renamed or removed since just before the last ransomware alert (or in the last 2 hours). Your own edits are left alone."; last: true; Btn { text: "Restore"; kind: "ghost"; small: true; clicked => { root.restore-files(); } } }
+                                }
+                            }
+                            Eyebrow { text: "CLOUD (OPTIONAL, ALL OFF UNTIL YOU TURN THEM ON)"; }
+                            Panel {
+                                VerticalLayout {
+                                    SettingRow { title: "Cloud reputation"; text: "When a program or script lands, Hexward sends the first 6 of the 64 characters of its fingerprint and compares the answer on this PC. The server can't tell which file it was."; Switch { checked: root.cloud-reputation; toggled(v) => { root.set-cloud-reputation(v); } } }
+                                    SettingRow { title: "Send detection reports"; text: "The file's name (never its folder), fingerprint and detection name, so false alarms get fixed for everyone. Kept 90 days. Allow also reports a false alarm."; Switch { checked: root.cloud-reports; toggled(v) => { root.set-cloud-reports(v); } } }
+                                    SettingRow { title: "Send samples to the lab"; text: "Adds a \"Send to lab\" button to results. Nothing is sent until you click it. See hexward.onurilabs.com/transparency."; last: true; Switch { checked: root.cloud-samples; toggled(v) => { root.set-cloud-samples(v); } } }
                                 }
                             }
                             Eyebrow { text: "TRUSTED FILES"; }

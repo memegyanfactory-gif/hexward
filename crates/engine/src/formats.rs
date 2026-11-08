@@ -454,7 +454,7 @@ pub fn disk_image_kind(d: &[u8]) -> Option<&'static str> {
 }
 
 /// Size of the PE file starting at `at`, from its section table.
-fn pe_size(d: &[u8], at: usize) -> Option<usize> {
+pub(crate) fn pe_size(d: &[u8], at: usize) -> Option<usize> {
     let pe = at + u32le(d, at + 0x3c)? as usize;
     if d.get(pe..pe + 4)? != b"PE\0\0" {
         return None;

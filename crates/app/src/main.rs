@@ -61,6 +61,14 @@ struct Settings {
     script_shield: bool,
     /// Decoy files and encryption-burst detection.
     ransomware_shield: bool,
+    /// Opt-in cloud: hash-prefix reputation lookups for files the shields check.
+    cloud_reputation: bool,
+    /// Opt-in cloud: send detection and false-alarm reports.
+    cloud_reports: bool,
+    /// Opt-in cloud: show "Send to lab" on scan results.
+    cloud_samples: bool,
+    /// Keep a private copy of documents and photos, for ransomware rollback.
+    document_backup: bool,
 }
 
 impl Default for Settings {
@@ -82,6 +90,10 @@ impl Default for Settings {
             quiet_mode: true,
             script_shield: true,
             ransomware_shield: true,
+            cloud_reputation: false,
+            cloud_reports: false,
+            cloud_samples: false,
+            document_backup: true,
         }
     }
 }
@@ -171,6 +183,9 @@ struct State {
     window_visible: bool,
     shields: shields::Shields,
     script_slot: Slot<(bool, Result<(), String>)>,
+    /// Result of "Send to lab": (file name, sample id or error).
+    sample_slot: Slot<(String, Result<String, String>)>,
+    restore_slot: Slot<Vec<hexward_engine::backup::Restored>>,
     /// Why it's quiet time right now (full-screen game, presentation), if it is.
     quiet: Option<&'static str>,
     next_quiet_check: Instant,
@@ -624,6 +639,10 @@ fn refresh_settings(st: &State, ui: &AppWindow) {
     ui.set_start_with_windows(st.settings.start_with_windows);
     ui.set_quiet_mode(st.settings.quiet_mode);
     ui.set_ransomware_shield(st.settings.ransomware_shield);
+    ui.set_cloud_reputation(st.settings.cloud_reputation);
+    ui.set_cloud_reports(st.settings.cloud_reports);
+    ui.set_cloud_samples(st.settings.cloud_samples);
+    ui.set_document_backup(st.settings.document_backup);
     ui.set_script_shield(st.settings.script_shield && amsi::is_registered());
     ui.set_file_shield(st.settings.file_shield);
     ui.set_process_shield(st.settings.process_shield);
@@ -993,10 +1012,40 @@ fn delete_row(st: &mut State, ui: &AppWindow, i: usize) {
     refresh_home(st, ui);
 }
 
+/// "Send to lab" (opt-in): the file goes to hexward.onurilabs.com for a person to review.
+fn send_sample_row(st: &mut State, ui: &AppWindow, i: usize) {
+    if !st.settings.cloud_samples {
+        return;
+    }
+    let Some(r) = st.reports.get(i).cloned() else { return };
+    let name = r.path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    toast(st, ui, "scan", "Sending to the lab", &name);
+    let out = st.sample_slot.clone();
+    std::thread::spawn(move || {
+        let res = hexward_update::cloud::send_sample(&r.path, "Sent from the Hexward app", &r.detections[0].name).map_err(|e| format!("{e:#}"));
+        if let Ok(mut g) = out.lock() {
+            *g = Some((name, res));
+        }
+    });
+}
+
 fn allow_row(st: &mut State, ui: &AppWindow, i: usize) {
     let Some(r) = st.reports.get(i).cloned() else { return };
     match allowlist::add(&r.sha256, r.path.clone(), &r.detections[0].name) {
         Ok(()) => {
+            if st.settings.cloud_reports {
+                // A false-alarm report, so the rule can be fixed for everyone.
+                let rep = hexward_update::cloud::Report {
+                    kind: hexward_update::cloud::Kind::FalseAlarm,
+                    sha256: Some(r.sha256.clone()),
+                    name: r.path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
+                    detection: r.detections[0].name.clone(),
+                    signer: None,
+                };
+                std::thread::spawn(move || {
+                    let _ = hexward_update::cloud::send_report(&rep);
+                });
+            }
             if let Some(e) = &st.engine {
                 e.reload_allowlist();
             }
@@ -1200,7 +1249,7 @@ fn finish_update(st: &mut State, ui: &AppWindow, r: Result<hexward_update::Repor
         Ok(rep) => {
             let mut lines = Vec::new();
             let mut ok = false;
-            for (name, step) in [("YARA Forge", &rep.yara_forge), ("MalwareBazaar", &rep.malwarebazaar), ("Driver blocklist", &rep.drivers)] {
+            for (name, step) in [("YARA Forge", &rep.yara_forge), ("MalwareBazaar", &rep.malwarebazaar), ("Driver blocklist", &rep.drivers), ("Community database", &rep.community)] {
                 match step {
                     Step::Updated { detail } => {
                         ok = true;
@@ -1369,6 +1418,24 @@ fn tick(st: &mut State, ui: &AppWindow) {
         ui.set_toast_visible(false);
     }
     tick_quiet(st, ui);
+    if let Some(list) = take(&st.restore_slot) {
+        use hexward_engine::backup::Outcome;
+        let ok = list.iter().filter(|r| r.outcome == Outcome::Restored).count();
+        let failed = list.len() - ok;
+        if list.is_empty() {
+            toast(st, ui, "safe", "Nothing to restore", "No backed-up file was damaged or removed.");
+        } else {
+            log(EventKind::Restore, format!("Restored {ok} files from the document backup"), list.iter().take(5).map(|r| r.path.display().to_string()).collect::<Vec<_>>().join(", "));
+            let detail = if failed == 0 { "Damaged versions were kept beside them as .hexward-damaged.".to_string() } else { format!("{failed} couldn't be restored; close programs using them and try again.") };
+            toast(st, ui, if failed == 0 { "safe" } else { "warn" }, &format!("Restored {ok} files"), &detail);
+        }
+    }
+    if let Some((name, r)) = take(&st.sample_slot) {
+        match r {
+            Ok(id) => toast(st, ui, "safe", "Sent to the lab", &format!("{name} (sample {id}). A person reviews it; confirmed threats protect every Hexward user.")),
+            Err(e) => toast(st, ui, "warn", "Couldn't send it", &e),
+        }
+    }
     if let Some((on, r)) = take(&st.script_slot) {
         ui.set_script_shield_busy(false);
         match r {
@@ -1507,6 +1574,8 @@ fn main() -> Result<(), slint::PlatformError> {
         window_visible: !background,
         quiet: None,
         script_slot: slot(),
+        sample_slot: slot(),
+        restore_slot: slot(),
         next_quiet_check: Instant::now(),
         quiet_paused_scan: false,
         held: Vec::new(),
@@ -1522,6 +1591,9 @@ fn main() -> Result<(), slint::PlatformError> {
         let mut s = st.borrow_mut();
         ui.set_tasks(s.tasks.model());
         s.shields.ransom_on.store(s.settings.ransomware_shield, Ordering::Relaxed);
+        shields::CLOUD_REPUTATION.store(s.settings.cloud_reputation, Ordering::Relaxed);
+        shields::CLOUD_REPORTS.store(s.settings.cloud_reports, Ordering::Relaxed);
+        shields::BACKUP_ON.store(s.settings.document_backup, Ordering::Relaxed);
         load_engine(&mut s);
         // Keep the start-with-Windows entry pointing at this copy (installed builds only).
         if let Ok(exe) = std::env::current_exe()
@@ -1830,6 +1902,40 @@ fn main() -> Result<(), slint::PlatformError> {
             let r = if v == amsi::is_registered() { Ok(()) } else { amsi::set_enabled(v) };
             if let Ok(mut g) = out.lock() {
                 *g = Some((v, r));
+            }
+        });
+    });
+    on!(on_set_cloud_reputation, |s, u, v: bool| {
+        s.settings.cloud_reputation = v;
+        s.settings.save();
+        shields::CLOUD_REPUTATION.store(v, Ordering::Relaxed);
+        u.set_cloud_reputation(v);
+    });
+    on!(on_set_cloud_reports, |s, u, v: bool| {
+        s.settings.cloud_reports = v;
+        s.settings.save();
+        shields::CLOUD_REPORTS.store(v, Ordering::Relaxed);
+        u.set_cloud_reports(v);
+    });
+    on!(on_set_cloud_samples, |s, u, v: bool| {
+        s.settings.cloud_samples = v;
+        s.settings.save();
+        u.set_cloud_samples(v);
+    });
+    on!(on_send_sample, |s, u, i: i32| { send_sample_row(s, &u, i as usize) });
+    on!(on_set_document_backup, |s, u, v: bool| {
+        s.settings.document_backup = v;
+        s.settings.save();
+        shields::BACKUP_ON.store(v, Ordering::Relaxed);
+        u.set_document_backup(v);
+    });
+    on!(on_restore_files, |s, u| {
+        toast(s, &u, "scan", "Restoring files", "Putting back files that were damaged, renamed or removed…");
+        let out = s.restore_slot.clone();
+        std::thread::spawn(move || {
+            let r = shields::restore_files();
+            if let Ok(mut g) = out.lock() {
+                *g = Some(r);
             }
         });
     });

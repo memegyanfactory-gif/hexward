@@ -100,7 +100,8 @@ $md = @(
     "| Test | File | Expected | Result |",
     "|---|---|---|---|"
 ) + $rows
-New-Item -ItemType Directory -Force (Split-Path $Out) | Out-Null
+$parent = Split-Path $Out
+if ($parent) { New-Item -ItemType Directory -Force $parent | Out-Null }
 $md -join "`n" | Out-File -Encoding utf8 $Out
 $md -join "`n" | Write-Host
 if ($env:GITHUB_STEP_SUMMARY) { $md -join "`n" | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY }

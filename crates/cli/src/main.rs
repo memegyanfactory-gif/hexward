@@ -69,6 +69,25 @@ enum Command {
         #[arg(long)]
         no_save: bool,
     },
+    /// Back up documents and photos now, for rollback after a ransomware attack.
+    Backup {
+        /// Folders to back up (default: Documents, Desktop, Pictures).
+        paths: Vec<PathBuf>,
+        /// Space the backup may use, in MB.
+        #[arg(long, default_value_t = 2048)]
+        budget_mb: u64,
+    },
+    /// Put back files ransomware damaged, renamed or removed, from Hexward's backup.
+    RestoreFiles {
+        /// Restore what changed in the last this many minutes.
+        #[arg(long, default_value_t = 120)]
+        minutes: u64,
+        /// Only list what would be restored.
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long)]
+        json: bool,
+    },
     /// Show which rules and hash lists are loaded.
     Rules {
         /// List rules that were left out.
@@ -162,6 +181,8 @@ fn main() -> ExitCode {
         }),
         Command::Update { yara, force, json, .. } => cmd_update(yara, force, json).map(|_| false),
         Command::Rules { verbose, rules } => cmd_rules(&rules, verbose).map(|_| false),
+        Command::Backup { paths, budget_mb } => cmd_backup(paths, budget_mb).map(|_| false),
+        Command::RestoreFiles { minutes, dry_run, json } => cmd_restore_files(minutes, dry_run, json),
         Command::Audit(a) => audit_cmd::run(a),
         // These report their own exit codes (guard check: 0 allow, 1 ask, 2 deny).
         Command::Guard(g) => return coded(guard_cmd::run(g)),
@@ -175,6 +196,45 @@ fn main() -> ExitCode {
             ExitCode::from(2)
         }
     }
+}
+
+fn cmd_backup(paths: Vec<PathBuf>, budget_mb: u64) -> Result<()> {
+    use hexward_engine::backup::Backup;
+    let roots = if paths.is_empty() { Backup::default_roots() } else { paths };
+    let bk = Backup::open(Backup::default_dir());
+    let st = bk.sync(&roots, budget_mb * 1024 * 1024, &|| false)?;
+    let (files, bytes) = bk.usage();
+    println!("{} files looked at, {} saved or updated. Backup holds {} files, {:.1} MB.", st.files, st.saved, files, bytes as f64 / 1048576.0);
+    if st.full {
+        println!("The space budget ({budget_mb} MB) is full; some files aren't backed up. Raise it with --budget-mb.");
+    }
+    for p in &st.refused {
+        println!("Not replaced (no longer looks like its file type, as if encrypted): {}", p.display());
+    }
+    Ok(())
+}
+
+/// Exit code 1 when something was (or would be) restored.
+fn cmd_restore_files(minutes: u64, dry_run: bool, json: bool) -> Result<bool> {
+    use hexward_engine::backup::{Backup, Outcome, minutes_ago};
+    let list = Backup::open(Backup::default_dir()).restore(minutes_ago(minutes), dry_run);
+    if json {
+        println!("{}", serde_json::to_string_pretty(&list)?);
+        return Ok(!list.is_empty());
+    }
+    if list.is_empty() {
+        println!("Nothing to restore: no backed-up file was damaged or removed in the last {minutes} minutes.");
+        return Ok(false);
+    }
+    for r in &list {
+        let what = match &r.outcome {
+            Outcome::Restored => "restored".to_string(),
+            Outcome::WouldRestore => "would restore".to_string(),
+            Outcome::Failed(e) => format!("failed: {e}"),
+        };
+        println!("{what:>14}  {}  ({})", r.path.display(), r.why);
+    }
+    Ok(true)
 }
 
 fn coded(r: Result<u8>) -> ExitCode {
@@ -600,7 +660,7 @@ fn cmd_update(pack: update::ForgePack, force: bool, json: bool) -> Result<()> {
     if json {
         println!("{}", serde_json::to_string_pretty(&report)?);
     } else {
-        for (name, step) in [("YARA Forge", &report.yara_forge), ("MalwareBazaar", &report.malwarebazaar), ("Drivers", &report.drivers)] {
+        for (name, step) in [("YARA Forge", &report.yara_forge), ("MalwareBazaar", &report.malwarebazaar), ("Drivers", &report.drivers), ("Community", &report.community)] {
             match step {
                 update::Step::Updated { detail } => println!("  {}  {name}: {detail}", st.good("updated")),
                 update::Step::Skipped { reason } => println!("  {}  {name}: {reason}", st.dim("skipped")),

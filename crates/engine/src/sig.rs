@@ -9,6 +9,22 @@ use std::path::Path;
 
 #[cfg(windows)]
 pub fn has_valid_signature(path: &Path) -> bool {
+    verify_embedded(path).0
+}
+
+/// Who signed the file (the signing certificate's display name), when it has a valid embedded signature.
+#[cfg(windows)]
+pub fn signer_name(path: &Path) -> Option<String> {
+    verify_embedded(path).1
+}
+
+#[cfg(not(windows))]
+pub fn signer_name(_path: &Path) -> Option<String> {
+    None
+}
+
+#[cfg(windows)]
+fn verify_embedded(path: &Path) -> (bool, Option<String>) {
     use std::ffi::c_void;
     use std::os::windows::ffi::OsStrExt;
     use std::ptr::null_mut;
@@ -37,11 +53,45 @@ pub fn has_valid_signature(path: &Path) -> bool {
 
     // SAFETY: `data`, `file`, `wide` and `action` all outlive both calls; the second call
     // releases the state the first one allocated.
+    // The signer's name is read from the verified state before it's released.
     unsafe {
+        use windows_sys::Win32::Security::Cryptography::{CERT_NAME_SIMPLE_DISPLAY_TYPE, CertGetNameStringW};
+        use windows_sys::Win32::Security::WinTrust::{WTHelperGetProvSignerFromChain, WTHelperProvDataFromStateData};
         let status = WinVerifyTrust(null_mut(), &mut action, (&mut data as *mut WINTRUST_DATA).cast::<c_void>());
+        let mut name = None;
+        if status == 0 {
+            let prov = WTHelperProvDataFromStateData(data.hWVTStateData);
+            let sgnr = if prov.is_null() { null_mut() } else { WTHelperGetProvSignerFromChain(prov, 0, 0, 0) };
+            if !sgnr.is_null() && (*sgnr).csCertChain > 0 && !(*sgnr).pasCertChain.is_null() {
+                let cert = (*(*sgnr).pasCertChain).pCert;
+                if !cert.is_null() {
+                    let mut buf = [0u16; 256];
+                    let n = CertGetNameStringW(cert, CERT_NAME_SIMPLE_DISPLAY_TYPE, 0, std::ptr::null(), buf.as_mut_ptr(), buf.len() as u32);
+                    if n > 1 {
+                        name = Some(String::from_utf16_lossy(&buf[..n as usize - 1]));
+                    }
+                }
+            }
+        }
         data.dwStateAction = WTD_STATEACTION_CLOSE;
         WinVerifyTrust(null_mut(), &mut action, (&mut data as *mut WINTRUST_DATA).cast::<c_void>());
-        status == 0
+        (status == 0, name)
+    }
+}
+
+#[cfg(all(test, windows))]
+mod signer_tests {
+    #[test]
+    fn reads_the_signer_of_a_signed_windows_file() {
+        let sys = std::path::PathBuf::from(std::env::var("SystemRoot").unwrap_or_else(|_| r"C:Windows".into())).join("System32");
+        let found = std::fs::read_dir(&sys)
+            .unwrap()
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| p.extension().is_some_and(|e| e.eq_ignore_ascii_case("exe")))
+            .take(400)
+            .find_map(|p| super::signer_name(&p));
+        assert!(found.is_some_and(|n| n.contains("Microsoft")), "no embedded-signed Microsoft program found in System32");
     }
 }
 

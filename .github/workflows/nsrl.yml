@@ -1,0 +1,25 @@
+# Weekly known-good check: every malware hash Hexward ships is looked up in CIRCL hashlookup,
+# which includes NIST's NSRL. A hash that turns out to be a known-good file fails this run, so the
+# false alarm is fixed before anyone meets it. Free: no keys, no paid services.
+
+name: Known-good check
+
+on:
+  schedule:
+    - cron: "41 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  nsrl:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # Node comes with the runner image.
+      - name: Look up shipped hashes
+        run: node scripts/nsrl-check.mjs --out nsrl.md
+      - name: Report
+        if: always()
+        run: cat nsrl.md >> "$GITHUB_STEP_SUMMARY"

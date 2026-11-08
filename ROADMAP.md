@@ -38,11 +38,12 @@ here is what updates the page.
 - [x] RTF objects (Equation Editor exploits), PDF JavaScript/launch actions/attachments, OneNote attachments
 - [x] CAB, RAR (file names and stored files), VHD/VHDX, IMG/UDF (programs carved from the image)
 - [x] MSI (embedded cabinets and custom-action programs), MSIX startup scripts, NSIS installers, UPX (NRV2B/2D/2E, LZMA), PyInstaller
-- [ ] Inno Setup unpacking, and compressed RAR entries (unRAR isn't GPL-compatible; needs our own decoder)
+- [x] Inno Setup unpacking, best effort: setup header ([Run] commands, [Code] script) and compressed file chunks, programs carved out
+- [ ] Compressed RAR entries (unRAR isn't GPL-compatible; needs our own decoder)
 - [x] Deeper script de-obfuscation (split strings, escapes, char-code arrays, reversed text, nested and compressed base64)
 - [x] Signed, staged rule packs: 5% → 25% → 100%, rollback, kill switch (daily rule-channel workflow)
 - [x] Bigger clean corpus for the gate: 16 popular installers and game launchers fetched fresh every release
-- [ ] NSRL Modern sets in the gate (too large for the free CI runner today)
+- [x] Weekly known-good check: every shipped malware hash looked up in CIRCL hashlookup, which includes the NSRL (the full NSRL sets are too large for the free CI runner)
 - [~] Head-to-head benchmark against KicomAV and ClamAV in a VM, results published (harness and method ready; VM run pending)
 
 ## Phase 2 · Real-time protection (user mode)
@@ -100,24 +101,24 @@ Cleaner
 - [ ] Static machine learning on Windows programs (EMBER2024 models) as one signal, never alone
 - [x] Memory scanning of running processes with YARA (memory not loaded from files, injected programs)
 - [x] Ransomware shield: canary files, rename/entropy bursts, shadow-copy deletion blocked
-- [ ] File rollback after a ransomware attack (needs Windows shadow copies and admin rights)
+- [x] File rollback after a ransomware attack, from Hexward's own document backup (no shadow copies or admin rights needed)
 - [ ] Unpacking and emulation for common packers
 
 ## Phase 5 · Certification (free route)
 
 - [x] Our own update signing (Ed25519) and signed GitHub releases (first: v0.2.0)
-- [ ] Free Authenticode signing through the SignPath Foundation (open-source program)
+- [ ] Free Authenticode signing through the SignPath Foundation (open-source program; application text ready in [docs/APPLICATIONS.md](docs/APPLICATIONS.md), a person has to submit it)
 - [x] EULA, privacy policy, published criteria for unwanted software ([docs/EULA.md](docs/EULA.md), [docs/PRIVACY.md](docs/PRIVACY.md), [docs/UNWANTED-SOFTWARE.md](docs/UNWANTED-SOFTWARE.md))
 - [x] Internal AMTSO-style tests published ([docs/SELFTEST.md](docs/SELFTEST.md), run on every release)
-- [ ] Free lab test series: AVLab, AV-Comparatives main series, SE Labs
+- [ ] Free lab test series: AVLab, AV-Comparatives main series, SE Labs (request texts ready in [docs/APPLICATIONS.md](docs/APPLICATIONS.md))
 
 ## Phase 6 · Cloud intelligence (opt-in) and the website
 
 - [x] hexward.onurilabs.com product page on the Onuri Labs site
-- [ ] Hash-prefix reputation lookups; certificate and signer reputation; community allow list
-- [ ] Separate opt-in for detection reports and sample upload; published retention policy
-- [ ] Dashboard: detections over time, false-alarm reports, supply-chain findings; database feeding rule packs
-- [ ] Yearly transparency report
+- [x] Hash-prefix reputation lookups; certificate and signer reputation; community allow list
+- [x] Separate opt-in for detection reports and sample upload; published retention policy (90 days, [docs/PRIVACY.md](docs/PRIVACY.md))
+- [x] Dashboard: detections over time, false-alarm reports, supply-chain findings; database feeding rule packs
+- [x] Transparency report, live at [hexward.onurilabs.com/transparency](https://hexward.onurilabs.com/transparency)
 
 ---
 

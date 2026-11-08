@@ -89,9 +89,15 @@ pub fn find(text: &str) -> Vec<(&'static str, Level, usize, String)> {
             out.push((p.name, p.level, at, value.to_string()));
         }
     }
+    // The marker must be one unbroken "-----BEGIN <TYPE> PRIVATE KEY-----": a line that only has
+    // "BEGIN" somewhere and "PRIVATE KEY-----" further on (a split-up test sample, an END marker)
+    // isn't a key.
     if let Some(at) = text.find("-----BEGIN ")
         && let Some(line) = text[at..].lines().next()
-        && line.contains("PRIVATE KEY-----")
+        && let Some(kind) = line["-----BEGIN ".len()..].split("-----").next()
+        && kind.ends_with("PRIVATE KEY")
+        && kind.bytes().all(|b| b.is_ascii_uppercase() || b == b' ')
+        && line["-----BEGIN ".len() + kind.len()..].starts_with("-----")
         && !text[at..].contains("ENCRYPTED")
     {
         out.push(("Private key", Level::High, at, line.to_string()));
@@ -308,6 +314,15 @@ mod tests {
         assert!(s.iter().any(|f| f.id == "env-file" && f.file == ".env"));
         assert!(!s.iter().any(|f| f.evidence.contains("EXAMPLE")), "AWS documentation key ignored");
         assert!(!s.iter().any(|f| f.file == ".env.example"));
+    }
+
+    #[test]
+    fn split_up_key_samples_are_not_keys() {
+        // How a test sample looks in source: the marker split in two, "\n" written out, an END marker.
+        let line = j(&["let key = j(&[\"-----BEGIN OPENSSH PRIV\", \"ATE KEY-----", "\\nb3BlbnNzaC1rZXktdjEAAAAA\\n-----END OPENSSH PRIVATE KEY-----\\n\"]);"]);
+        assert!(find(&line).is_empty(), "{:?}", find(&line));
+        let real = j(&["-----BEGIN RSA PRIV", "ATE KEY-----\nMIIEowIBAAKCAQEA\n"]);
+        assert_eq!(find(&real).len(), 1);
     }
 
     #[test]

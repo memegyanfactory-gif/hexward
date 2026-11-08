@@ -67,6 +67,103 @@ pub struct Shields {
 }
 
 const MAX_SIZE: u64 = 64 * 1024 * 1024;
+
+/// Opt-in cloud switches (Settings › Cloud). Both off by default.
+pub static CLOUD_REPUTATION: AtomicBool = AtomicBool::new(false);
+pub static CLOUD_REPORTS: AtomicBool = AtomicBool::new(false);
+/// Document backup for ransomware rollback (Settings › Document backup).
+pub static BACKUP_ON: AtomicBool = AtomicBool::new(true);
+/// When the ransomware shield last raised an alarm (Unix seconds; 0 = never).
+pub static LAST_RANSOM_ALARM: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
+
+fn unix_now() -> i64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0)
+}
+
+/// Restores files damaged since shortly before the last ransomware alarm (or the last 2 hours).
+pub fn restore_files() -> Vec<hexward_engine::backup::Restored> {
+    use hexward_engine::backup::{Backup, minutes_ago};
+    let alarm = LAST_RANSOM_ALARM.load(Ordering::Relaxed);
+    let since = if alarm > 0 && unix_now() - alarm < 7 * 86400 { alarm - 15 * 60 } else { minutes_ago(120) };
+    Backup::open(Backup::default_dir()).restore(since, false)
+}
+
+/// Kinds of file worth a cloud lookup when the local engine found nothing: programs and scripts.
+fn worth_a_lookup(path: &Path) -> bool {
+    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase();
+    matches!(
+        ext.as_str(),
+        "exe" | "dll" | "scr" | "com" | "msi" | "msix" | "appx" | "sys" | "cpl" | "ps1" | "psm1" | "vbs" | "vbe" | "js" | "jse" | "wsf" | "hta" | "bat" | "cmd" | "lnk" | "jar" | "iso" | "img" | "vhd" | "vhdx" | "zip" | "rar" | "7z"
+    )
+}
+
+/// Cloud reputation (opt-in): only the first 6 hex characters of the hash are sent; the full hash is
+/// compared here. Known malware the local lists don't have yet becomes a confirmed detection; a
+/// suspicious-only verdict on a file the community allow-listed is dropped.
+pub fn cloud_judge(report: &mut FileReport) {
+    use hexward_engine::{Detection, Severity, Source};
+    use hexward_update::cloud::{self, Reputation};
+    if !CLOUD_REPUTATION.load(Ordering::Relaxed) {
+        return;
+    }
+    let clean = report.detections.is_empty();
+    if clean && !worth_a_lookup(&report.path) {
+        return;
+    }
+    if !clean && report.is_confirmed() {
+        return; // already certain; nothing the cloud could change
+    }
+    match cloud::lookup(&report.sha256) {
+        Ok(Reputation::Bad { name, source }) => {
+            report.detections.push(Detection::new(
+                name,
+                Severity::High,
+                Source::Hash,
+                format!("Hexward's cloud knows this exact file as malware (from {source})."),
+            ));
+            return;
+        }
+        Ok(Reputation::Allowed { .. }) => {
+            report.detections.clear();
+            return;
+        }
+        _ => {}
+    }
+    // Signer reputation: certificates known to sign malware (often stolen), and trusted publishers.
+    let ext = report.path.extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase();
+    if matches!(ext.as_str(), "exe" | "dll" | "msi" | "sys" | "scr")
+        && let Some(signer) = hexward_engine::sig::signer_name(&report.path)
+    {
+        report.signed = Some(true);
+        match cloud::signer_verdict(&signer).as_deref() {
+            Some("bad") => report.detections.push(Detection::new(
+                "Malware/Win.BadSigner!cloud",
+                Severity::High,
+                Source::Rule,
+                format!("Signed by \"{signer}\", a certificate Hexward's cloud knows is used to sign malware."),
+            )),
+            Some("trusted") => report.detections.clear(), // only suspicious finds reach here
+            _ => {}
+        }
+    }
+}
+
+/// Detection report (opt-in): file name, hash, detection name, version. Sent in the background.
+pub fn cloud_report(report: &FileReport) {
+    if !CLOUD_REPORTS.load(Ordering::Relaxed) || report.detections.is_empty() {
+        return;
+    }
+    let r = hexward_update::cloud::Report {
+        kind: hexward_update::cloud::Kind::Detection,
+        sha256: Some(report.sha256.clone()),
+        name: report.path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
+        detection: report.detections[0].name.clone(),
+        signer: None,
+    };
+    std::thread::spawn(move || {
+        let _ = hexward_update::cloud::send_report(&r);
+    });
+}
 /// A file must stop changing for this long before it is scanned (downloads finishing, installers writing).
 const SETTLE: Duration = Duration::from_millis(1500);
 
@@ -175,9 +272,11 @@ impl Shields {
                                 stats.files_marked.fetch_add(1, Ordering::Relaxed);
                             }
                             let mut scanner = eng.rules().scanner();
-                            if let Ok(Some(report)) = eng.scan_file(&mut scanner, &path, MAX_SIZE) {
+                            if let Ok(Some(mut report)) = eng.scan_file(&mut scanner, &path, MAX_SIZE) {
                                 stats.files_checked.fetch_add(1, Ordering::Relaxed);
+                                cloud_judge(&mut report);
                                 if !report.detections.is_empty() {
+                                    cloud_report(&report);
                                     let origin = hexward_engine::motw::read(&path).and_then(|m| m.host_url.or(m.referrer_url));
                                     let mut ev = act(report, "File shield", auto.load(Ordering::Relaxed), None);
                                     if let Some(o) = origin {
@@ -246,9 +345,11 @@ impl Shields {
                                 continue;
                             }
                             let mut scanner = eng.rules().scanner();
-                            if let Ok(Some(report)) = eng.scan_file(&mut scanner, exe, MAX_SIZE) {
+                            if let Ok(Some(mut report)) = eng.scan_file(&mut scanner, exe, MAX_SIZE) {
                                 stats.programs_checked.fetch_add(1, Ordering::Relaxed);
+                                cloud_judge(&mut report);
                                 if !report.detections.is_empty() {
+                                    cloud_report(&report);
                                     let stop = || proc_.kill();
                                     let ev = act(report, "Process shield", auto.load(Ordering::Relaxed), Some(&stop));
                                     if let Ok(mut e) = events.lock() {
@@ -336,6 +437,7 @@ impl Shields {
                             burst.check().map(|a| format!("{}.", a.reason))
                         };
                         let Some(reason) = reason else { continue };
+                        LAST_RANSOM_ALARM.store(unix_now(), Ordering::Relaxed);
                         let mut action = format!("{reason} That's how ransomware behaves.");
                         match &writer {
                             Some((pid, name, exe)) => {
@@ -348,12 +450,46 @@ impl Shields {
                             }
                             None => action.push_str(" No unsigned program was writing heavily; if you're copying or converting lots of files yourself, that's the cause."),
                         }
+                        if BACKUP_ON.load(Ordering::Relaxed) {
+                            action.push_str(" If files were damaged, Settings › Document backup › Restore puts them back.");
+                        }
                         push(&events, ShieldEvent { shield: "Ransomware shield", report: None, title: "Possible ransomware activity".into(), action, quarantined: false, neutralize: false });
                         burst.clear();
                         quiet_until = Instant::now() + Duration::from_secs(60);
                         if !dev {
                             canaries = ensure_canaries(&folders, &store);
                         }
+                    }
+                })
+                .ok();
+        }
+
+        // ---- document backup: a private copy of documents and photos, for ransomware rollback ----
+        {
+            let on = ransom_on.clone();
+            std::thread::Builder::new()
+                .name("document-backup".into())
+                .spawn(move || {
+                    use hexward_engine::backup::{Backup, DEFAULT_BUDGET};
+                    hexward_engine::perf::background_thread();
+                    // Development builds don't copy the developer's documents.
+                    if std::env::current_exe().map(|e| e.to_string_lossy().to_ascii_lowercase().contains(r"\target\")).unwrap_or(true) {
+                        return;
+                    }
+                    let may_run = || {
+                        BACKUP_ON.load(Ordering::Relaxed)
+                            && on.load(Ordering::Relaxed)
+                            && unix_now() - LAST_RANSOM_ALARM.load(Ordering::Relaxed) > 6 * 3600 // never during or right after an attack
+                            && !hexward_engine::perf::on_battery()
+                            && hexward_engine::perf::quiet_reason().is_none()
+                    };
+                    std::thread::sleep(Duration::from_secs(180));
+                    loop {
+                        if may_run() {
+                            let bk = Backup::open(Backup::default_dir());
+                            let _ = bk.sync(&Backup::default_roots(), DEFAULT_BUDGET, &|| !may_run());
+                        }
+                        std::thread::sleep(Duration::from_secs(30 * 60));
                     }
                 })
                 .ok();
