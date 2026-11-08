@@ -17,7 +17,7 @@ pub struct StartupItem {
     /// The program file the command runs, when it could be worked out.
     pub target: Option<PathBuf>,
     /// How Hexward can switch this entry off. None for entries it won't touch
-    /// (services, drivers, scheduled tasks, Winlogon).
+    /// (drivers, Winlogon, and Windows' own services and scheduled tasks).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fix: Option<FixTarget>,
 }
@@ -29,6 +29,10 @@ pub enum FixTarget {
     RegistryValue { hive: String, key: String, value: String },
     /// A file in a Startup folder.
     File { path: PathBuf },
+    /// A scheduled task that isn't part of Windows, by its Task Scheduler path.
+    ScheduledTask { path: String },
+    /// An auto-start service that isn't part of Windows. `start` is how it started before.
+    Service { name: String, start: String },
 }
 
 /// A startup entry Hexward switched off, with what it needs to switch it back on.
@@ -74,6 +78,52 @@ fn friendly(e: std::io::Error) -> String {
     }
 }
 
+/// Runs a Windows tool; if Windows refuses (usually for lack of administrator rights), runs it
+/// again elevated, which shows the UAC prompt. So admin is asked for only when it's needed.
+#[cfg(windows)]
+fn run_admin_if_needed(tool: &str, args: &[&str]) -> Result<(), String> {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    let out = std::process::Command::new(tool).args(args).creation_flags(CREATE_NO_WINDOW).output().map_err(|e| e.to_string())?;
+    if out.status.success() {
+        return Ok(());
+    }
+    match run_elevated(tool, args) {
+        Some(0) => Ok(()),
+        None => Err("Windows needs administrator approval for this, and it wasn't given.".into()),
+        Some(code) => Err(format!("Windows couldn't change it ({tool} exit code {code}).")),
+    }
+}
+
+/// Runs a program elevated and waits for it. Returns its exit code, or None if the user said no.
+#[cfg(windows)]
+fn run_elevated(tool: &str, args: &[&str]) -> Option<u32> {
+    use windows_sys::Win32::Foundation::CloseHandle;
+    use windows_sys::Win32::System::Threading::{GetExitCodeProcess, INFINITE, WaitForSingleObject};
+    use windows_sys::Win32::UI::Shell::{SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW, ShellExecuteExW};
+    let w = |s: &str| -> Vec<u16> { s.encode_utf16().chain(std::iter::once(0)).collect() };
+    let quoted: Vec<String> = args.iter().map(|a| if a.contains(' ') || a.is_empty() { format!("\"{a}\"") } else { a.to_string() }).collect();
+    let (verb, file, params) = (w("runas"), w(tool), w(&quoted.join(" ")));
+    // SAFETY: the strings outlive the call; the process handle is waited on and closed.
+    unsafe {
+        let mut info: SHELLEXECUTEINFOW = std::mem::zeroed();
+        info.cbSize = std::mem::size_of::<SHELLEXECUTEINFOW>() as u32;
+        info.fMask = SEE_MASK_NOCLOSEPROCESS;
+        info.lpVerb = verb.as_ptr();
+        info.lpFile = file.as_ptr();
+        info.lpParameters = params.as_ptr();
+        info.nShow = 0; // hidden
+        if ShellExecuteExW(&mut info) == 0 || info.hProcess.is_null() {
+            return None; // declined, or couldn't start
+        }
+        WaitForSingleObject(info.hProcess, INFINITE);
+        let mut code = 1u32;
+        GetExitCodeProcess(info.hProcess, &mut code);
+        CloseHandle(info.hProcess);
+        Some(code)
+    }
+}
+
 /// Switches a startup entry off and remembers how to undo it.
 /// Registry values are deleted (their data is kept here); files are moved out of the Startup folder.
 #[cfg(windows)]
@@ -103,6 +153,15 @@ pub fn disable(item: &StartupItem) -> Result<DisabledItem, String> {
             let dest = dir.join(format!("{id}-{name}"));
             std::fs::rename(path, &dest).or_else(|_| std::fs::copy(path, &dest).and_then(|_| std::fs::remove_file(path))).map_err(friendly)?;
             dest.display().to_string()
+        }
+        FixTarget::ScheduledTask { path } => {
+            run_admin_if_needed("schtasks.exe", &["/Change", "/TN", path, "/DISABLE"])?;
+            String::new()
+        }
+        FixTarget::Service { name, .. } => {
+            // "demand": the service no longer starts with Windows but can still run when an app asks.
+            run_admin_if_needed("sc.exe", &["config", name, "start=", "demand"])?;
+            String::new()
         }
     };
     let entry = DisabledItem { id, at: Utc::now(), location: item.location.clone(), name: item.name.clone(), command: item.command.clone(), target: fix, saved };
@@ -134,6 +193,8 @@ pub fn restore(id: &str) -> Result<DisabledItem, String> {
             }
             std::fs::rename(&item.saved, path).map_err(friendly)?;
         }
+        FixTarget::ScheduledTask { path } => run_admin_if_needed("schtasks.exe", &["/Change", "/TN", path, "/ENABLE"])?,
+        FixTarget::Service { name, start } => run_admin_if_needed("sc.exe", &["config", name, "start=", start])?,
     }
     list.remove(pos);
     save_disabled(&list)?;
@@ -357,7 +418,12 @@ fn task_items(items: &mut Vec<StartupItem>) {
         }
         let Ok(bytes) = std::fs::read(entry.path()) else { continue };
         let xml = decode_text(&bytes);
+        // A task switched off in Task Scheduler doesn't start anything.
+        if xml.split("<Settings>").nth(1).and_then(|s| s.split("</Settings>").next()).is_some_and(|s| s.contains("<Enabled>false</Enabled>")) {
+            continue;
+        }
         let name = entry.path().strip_prefix(&root).unwrap_or(entry.path()).display().to_string();
+        let windows_task = name.to_ascii_lowercase().starts_with(r"microsoft\");
         let mut rest = xml.as_str();
         while let Some(start) = rest.find("<Command>") {
             let after = &rest[start + 9..];
@@ -372,7 +438,12 @@ fn task_items(items: &mut Vec<StartupItem>) {
                 .unwrap_or_default();
             let quoted = if command.contains(' ') && !command.starts_with('"') { format!("\"{command}\"") } else { command };
             let full = if args.is_empty() { quoted } else { format!("{quoted} {args}") };
-            push(items, "Scheduled task", &name, &full);
+            if push(items, "Scheduled task", &name, &full)
+                && !windows_task
+                && let Some(last) = items.last_mut()
+            {
+                last.fix = Some(FixTarget::ScheduledTask { path: format!(r"\{name}") });
+            }
             rest = &after[end..];
         }
     }
@@ -396,9 +467,24 @@ fn service_items(items: &mut Vec<StartupItem>) {
         }
         if let Ok(image) = svc.get_value::<String, _>("ImagePath") {
             let location = if kind & 0x30 != 0 { "Service" } else { "Driver" };
-            push(items, location, &name, &image);
+            if push(items, location, &name, &image)
+                && location == "Service"
+                && start == 2
+                && let Some(last) = items.last_mut()
+                && last.target.as_ref().is_some_and(|t| !is_windows_file(t))
+            {
+                let delayed: u32 = svc.get_value("DelayedAutostart").unwrap_or(0);
+                last.fix = Some(FixTarget::Service { name: name.clone(), start: if delayed == 1 { "delayed-auto".into() } else { "auto".into() } });
+            }
         }
     }
+}
+
+/// Inside the Windows folder: part of Windows, so Hexward won't switch it off.
+#[cfg(windows)]
+fn is_windows_file(p: &Path) -> bool {
+    let w = windows_dir().to_string_lossy().to_lowercase();
+    p.to_string_lossy().to_lowercase().starts_with(&format!(r"{}\", w.trim_end_matches('\\')))
 }
 
 fn decode_text(bytes: &[u8]) -> String {
@@ -417,6 +503,25 @@ fn unescape_xml(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_own_tasks_and_services_get_no_switch() {
+        assert!(is_windows_file(Path::new(r"C:\Windows\System32\svchost.exe")));
+        assert!(!is_windows_file(Path::new(r"C:\Program Files\Google\Update\GoogleUpdate.exe")));
+        for item in list_startup_items() {
+            match &item.fix {
+                Some(FixTarget::ScheduledTask { path }) => assert!(!path.to_ascii_lowercase().starts_with(r"\microsoft\"), "{path}"),
+                Some(FixTarget::Service { name, .. }) => {
+                    assert!(item.target.as_ref().is_some_and(|t| !is_windows_file(t)), "{name}");
+                }
+                _ => {}
+            }
+            if item.location == "Driver" {
+                assert!(item.fix.is_none());
+            }
+        }
+    }
 
     #[cfg(windows)]
     #[test]
@@ -497,5 +602,20 @@ mod fix_tests {
         // Entries without a fix are refused.
         let item = StartupItem { location: "Service".into(), name: "x".into(), command: "x".into(), target: None, fix: None };
         assert!(disable(&item).is_err());
+
+        // A throwaway scheduled task of our own (one-off, never runs), switched off and on, then deleted.
+        let task = format!(r"\HexwardSelfTest-{}", std::process::id());
+        let schtasks = |args: &[&str]| std::process::Command::new("schtasks.exe").args(args).output().ok();
+        let created = schtasks(&["/Create", "/TN", &task, "/TR", r"C:\Windows\System32\notepad.exe", "/SC", "ONCE", "/ST", "23:59", "/SD", "01/01/2099", "/F"]).is_some_and(|o| o.status.success());
+        if created {
+            let enabled = || schtasks(&["/Query", "/TN", &task, "/XML"]).map(|o| String::from_utf8_lossy(&o.stdout).into_owned()).is_some_and(|x| !x.contains("<Enabled>false</Enabled>"));
+            assert!(enabled());
+            let item = StartupItem { location: "Scheduled task".into(), name: task.clone(), command: "notepad.exe".into(), target: None, fix: Some(FixTarget::ScheduledTask { path: task.clone() }) };
+            let d = disable(&item).unwrap();
+            assert!(!enabled(), "task switched off");
+            restore(&d.id).unwrap();
+            assert!(enabled(), "task back on");
+            schtasks(&["/Delete", "/TN", &task, "/F"]);
+        }
     }
 }

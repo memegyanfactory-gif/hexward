@@ -64,7 +64,7 @@ Startup manager
 - [x] List and scan everything that starts with Windows (Run keys, Startup folders, tasks, services, Winlogon)
 - [x] Switch entries off and back on with undo (Run keys, Startup folders)
 - [x] Every entry with publisher, signature status, size and icon, sorted and searchable
-- [ ] Scheduled tasks and services on/off (asks for admin only when needed)
+- [x] Scheduled tasks and services on/off (asks for admin only when needed; Windows' own tasks and services are never offered)
 
 Task manager
 - [x] Processes grouped: Windows (system), Apps (with a window), Background; SYSTEM services resolved through the Service Control Manager

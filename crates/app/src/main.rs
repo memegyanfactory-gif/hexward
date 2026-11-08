@@ -144,6 +144,7 @@ struct State {
     startup_items: StartupResult,
     startup_visible: Vec<usize>,
     startup_slot: Slot<StartupResult>,
+    startup_fix_slot: Slot<(bool, Result<startup::DisabledItem, String>)>,
     startup_checked_at: Option<chrono::DateTime<Utc>>,
     update_slot: Slot<Result<hexward_update::Report, String>>,
     vault_rows: Rc<VecModel<VaultRow>>,
@@ -1162,6 +1163,28 @@ fn tick(st: &mut State, ui: &AppWindow) {
         show_startup(st, ui);
         refresh_home(st, ui);
     }
+    if let Some((off, r)) = take(&st.startup_fix_slot) {
+        ui.set_startup_busy(false);
+        match (off, r) {
+            (true, Ok(d)) => {
+                st.startup_items.retain(|x| !(x.0.name == d.name && x.0.location == d.location && x.0.command == d.command));
+                log(EventKind::StartupFix, format!("Switched off {}", d.name), d.command.clone());
+                show_startup(st, ui);
+                let how = match d.target {
+                    startup::FixTarget::Service { .. } => "won't start with Windows any more; it still runs if an app needs it",
+                    _ => "won't start with Windows",
+                };
+                toast(st, ui, "safe", "Switched off", &format!("{} {how}. Turn it back on anytime.", d.name));
+            }
+            (false, Ok(d)) => {
+                log(EventKind::StartupFix, format!("Turned {} back on", d.name), d.command.clone());
+                show_startup(st, ui);
+                toast(st, ui, "scan", "Turned back on", &format!("{} will start with Windows again.", d.name));
+            }
+            (true, Err(e)) => toast(st, ui, "warn", "Couldn't switch it off", &e),
+            (false, Err(e)) => toast(st, ui, "warn", "Couldn't turn it back on", &e),
+        }
+    }
     if let Some(r) = take(&st.update_slot) {
         finish_update(st, ui, r);
     }
@@ -1299,6 +1322,7 @@ fn main() -> Result<(), slint::PlatformError> {
         startup_items: Vec::new(),
         startup_visible: Vec::new(),
         startup_slot: slot(),
+        startup_fix_slot: slot(),
         startup_checked_at: None,
         update_slot: slot(),
         vault_rows,
@@ -1455,28 +1479,28 @@ fn main() -> Result<(), slint::PlatformError> {
         u.set_startup_show_all(v);
         show_startup(s, &u);
     });
+    // Switching runs on a worker: tasks and services may wait on a UAC prompt.
     on!(on_disable_startup, |s, u, i: i32| {
         let Some(&idx) = s.startup_visible.get(i as usize) else { return };
         let item = s.startup_items[idx].0.clone();
-        match startup::disable(&item) {
-            Ok(d) => {
-                s.startup_items.remove(idx);
-                log(EventKind::StartupFix, format!("Switched off {}", d.name), d.command.clone());
-                show_startup(s, &u);
-                toast(s, &u, "safe", "Switched off", &format!("{} won't start with Windows. Turn it back on anytime.", d.name));
+        u.set_startup_busy(true);
+        let out = s.startup_fix_slot.clone();
+        std::thread::spawn(move || {
+            let r = startup::disable(&item);
+            if let Ok(mut g) = out.lock() {
+                *g = Some((true, r));
             }
-            Err(e) => toast(s, &u, "warn", "Couldn't switch it off", &e),
-        }
+        });
     });
     on!(on_restore_startup, |s, u, id: SharedString| {
-        match startup::restore(&id) {
-            Ok(d) => {
-                log(EventKind::StartupFix, format!("Turned {} back on", d.name), d.command.clone());
-                show_startup(s, &u);
-                toast(s, &u, "scan", "Turned back on", &format!("{} will start with Windows again.", d.name));
+        u.set_startup_busy(true);
+        let out = s.startup_fix_slot.clone();
+        std::thread::spawn(move || {
+            let r = startup::restore(&id);
+            if let Ok(mut g) = out.lock() {
+                *g = Some((false, r));
             }
-            Err(e) => toast(s, &u, "warn", "Couldn't turn it back on", &e),
-        }
+        });
     });
     on!(on_vault_ask, |s, _u, i: i32| {
         if let Some(mut r) = s.vault_rows.row_data(i as usize) {

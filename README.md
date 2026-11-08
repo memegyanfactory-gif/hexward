@@ -13,7 +13,7 @@ No account. No ads. No paid tier. Nothing leaves your PC unless you choose to se
 ![Platform](https://img.shields.io/badge/Windows-10%20%7C%2011-0B0F14?logo=windows&logoColor=4BE07A)
 ![License](https://img.shields.io/badge/license-GPL--3.0-0B0F14?labelColor=1A7F45)
 ![Rules](https://img.shields.io/badge/YARA%20rules-5%2C100%2B-0B0F14?labelColor=1A7F45)
-![Tests](https://img.shields.io/badge/tests-71%20passing-0B0F14?labelColor=1A7F45)
+![Tests](https://img.shields.io/badge/tests-72%20passing-0B0F14?labelColor=1A7F45)
 
 <img src="docs/screenshots/01-home.png" alt="Hexward home screen" width="860">
 
@@ -55,7 +55,7 @@ and covers attacks Defender wasn't built for, like weaponized shortcuts, ClickFi
 
 - **Cleaner.** Finds Chrome, Edge, Firefox, Brave, Opera, Opera GX, Vivaldi and Yandex, shows each with its own icon, and measures every item before anything is deleted. Cache is ticked by default; history, cookies and the Recycle Bin wait for you. Bookmarks and saved passwords are never touched, and Firefox history is left alone because it shares a file with bookmarks. An open browser is skipped (or closed politely, like clicking its X, if you ask). Temp files from the last 24 hours are kept, and files in use are skipped.
 - **Task manager.** Every running program with its icon, publisher, CPU and memory, grouped into Apps, Background and Windows. Windows processes and security software are locked: Hexward refuses to end them, checked again at the moment you click. Scan any running program, open its folder, or end it after a confirm step. Unsigned programs running from Temp or Downloads are highlighted. SYSTEM services are matched to their programs through the Service Control Manager, so they land in the right group without admin rights.
-- **Startup manager.** Everything that starts with Windows, scanned, with publisher, signature status, size and icon. Search and sort it, and switch entries off and back on.
+- **Startup manager.** Everything that starts with Windows, scanned, with publisher, signature status, size and icon. Search and sort it, and switch entries off and back on: Run keys, Startup-folder shortcuts, and third-party scheduled tasks and services. Windows asks for administrator approval only when a change needs it, and Windows' own tasks, services and drivers are never offered.
 
 ---
 
@@ -230,7 +230,7 @@ docs/            strategy and research, screenshots
 ## Testing
 
 ```bash
-cargo test --workspace      # 71 tests
+cargo test --workspace      # 72 tests
 cargo clippy --workspace --all-targets -- -D warnings
 target\debug\hexward-app.exe --shots docs\screenshots   # renders every screen to PNG
 ```
