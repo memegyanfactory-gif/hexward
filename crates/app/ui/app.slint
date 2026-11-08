@@ -1,0 +1,1555 @@
+// Hexward desktop app. Look and motion follow the Hexward brand book:
+// pixel grid, notched corners, hard shadows, Ink / Moss / Oxide, Pixelify Sans + Geist + Geist Mono.
+// One window: the title bar is part of the app. Animations run off one frame clock that only
+// ticks while something is moving.
+
+import { ScrollView } from "std-widgets.slint";
+import "fonts/PixelifySans.ttf";
+import "fonts/Geist.ttf";
+import "fonts/GeistMono.ttf";
+
+export struct PixelDot { x: int, y: int, c: int }
+export struct ThreatRow { name: string, path: string, description: string, chip: string, tone: string, selected: bool, done: bool, confirm-delete: bool }
+export struct VaultRow { id: string, name: string, path: string, info: string, confirm: bool }
+export struct StartupRow { location: string, name: string, command: string, chip: string, tone: string, fixable: bool, detail: string }
+export struct DisabledRow { id: string, name: string, info: string }
+export struct EventRow { when: string, title: string, detail: string, chip: string, tone: string }
+export struct StatItem { label: string, value: string }
+export struct StatusRow { name: string, value: string, tone: string }
+export struct DriveRow { root: string, label: string, info: string, selected: bool, usage: float }
+export struct AllowRow { sha: string, name: string, path: string }
+
+export global Theme {
+    in-out property <bool> dark: true;
+    out property <color> bg: dark ? #0B0F14 : #F3F6F2;
+    out property <color> surface: dark ? #10161E : #FFFFFF;
+    out property <color> raised: dark ? #161E28 : #E8EEE9;
+    out property <color> line: dark ? #263241 : #C9D4CC;
+    out property <color> line-strong: dark ? #3A4B60 : #9FB0A5;
+    out property <color> fg: dark ? #E6EDF3 : #0B0F14;
+    out property <color> fg-2: dark ? #A3B1C2 : #3F4B57;
+    out property <color> fg-3: dark ? #7A8A9D : #5F6B78;
+    out property <color> accent: dark ? #4BE07A : #1A7F45;
+    out property <color> on-accent: dark ? #05210F : #FFFFFF;
+    out property <color> oxide: dark ? #F0743A : #C9531B;
+    out property <color> alarm: dark ? #FF5468 : #D21F3C;
+    out property <color> amber: dark ? #FFB547 : #A86A00;
+    out property <color> signal: dark ? #5AA9FF : #1C64C8;
+    out property <color> shadow: dark ? #020406 : #B9C6BD;
+    out property <color> mark-hi: dark ? #4BE07A : #2FB463;
+    out property <color> mark-lo: dark ? #23A05A : #1A7F45;
+    out property <color> heat-0: dark ? #161E28 : #E2E9E4;
+    out property <color> heat-1: dark ? #0F3D2A : #BFE8CB;
+    out property <color> heat-2: dark ? #17663F : #7CD097;
+    out property <color> heat-3: dark ? #23A05A : #2FA25C;
+    out property <color> heat-4: dark ? #4BE07A : #17703D;
+    out property <string> pixel: "Pixelify Sans";
+    out property <string> body: "Geist";
+    out property <string> mono: "Geist Mono";
+
+    public pure function tone(name: string) -> color {
+        return name == "safe" ? accent : name == "scan" ? signal : name == "warn" ? amber : name == "alarm" ? alarm : name == "oxide" ? oxide : fg-3;
+    }
+}
+
+export global Assets {
+    in property <[PixelDot]> mark-pixels;
+    in property <image> wordmark;
+    in property <image> i-shield;
+    in property <image> i-scan;
+    in property <image> i-bug;
+    in property <image> i-vault;
+    in property <image> i-clock;
+    in property <image> i-gear;
+    in property <image> i-info;
+    in property <image> i-folder;
+    in property <image> i-file;
+    in property <image> i-bolt;
+    in property <image> i-update;
+    in property <image> i-disk;
+    in property <image> i-trash;
+    in property <image> i-check;
+}
+
+// ---------- type ----------
+
+component Eyebrow inherits Text {
+    font-family: Theme.mono;
+    font-size: 11px;
+    letter-spacing: 1.2px;
+    color: Theme.fg-3;
+}
+
+component Title inherits Text {
+    font-family: Theme.pixel;
+    font-size: 32px;
+    font-weight: 600;
+    color: Theme.fg;
+}
+
+component Body inherits Text {
+    font-family: Theme.body;
+    font-size: 14px;
+    color: Theme.fg-2;
+    wrap: word-wrap;
+}
+
+component Mono inherits Text {
+    font-family: Theme.mono;
+    font-size: 12px;
+    color: Theme.fg-2;
+    overflow: elide;
+}
+
+// ---------- pixel surfaces ----------
+
+component Edges inherits Rectangle {
+    in property <color> edge;
+    in property <length> t: 2px;
+    Rectangle { x: 0; y: -root.t; width: root.width; height: root.t; background: root.edge; }
+    Rectangle { x: 0; y: root.height; width: root.width; height: root.t; background: root.edge; }
+    Rectangle { x: -root.t; y: 0; width: root.t; height: root.height; background: root.edge; }
+    Rectangle { x: root.width; y: 0; width: root.t; height: root.height; background: root.edge; }
+}
+
+// The brand's panel: 2 px border, empty corner pixels, optional hard shadow.
+component Panel inherits Rectangle {
+    in property <color> fill: Theme.surface;
+    in property <color> edge: Theme.line;
+    in property <bool> raised: false;
+    if root.raised: Rectangle {
+        x: 6px;
+        y: 6px;
+        width: root.width;
+        height: root.height;
+        background: Theme.shadow;
+    }
+    Rectangle {
+        x: 0;
+        y: 0;
+        width: root.width;
+        height: root.height;
+        background: root.fill;
+        animate background { duration: 160ms; }
+    }
+    Edges { x: 0; y: 0; width: root.width; height: root.height; edge: root.edge; }
+    @children
+}
+
+// The Hexward mark drawn pixel by pixel, so it can assemble, scan and speak.
+component PixelMark inherits Rectangle {
+    in property <length> size: 96px;
+    // brand | safe | scan | warn | alarm
+    in property <string> state: "brand";
+    // 0 → 1: pixels drop into place row by row.
+    in property <float> build: 1;
+    // Row being scanned (-1 for none); lights that row and fades the one above.
+    in property <int> scan-row: -1;
+    in property <bool> blink: false;
+    in property <int> frame: 0;
+    property <length> u: root.size / 16;
+    property <color> core: root.state == "brand" ? Theme.oxide : Theme.tone(root.state);
+    property <bool> core-off: root.blink && Math.mod(root.frame, root.state == "alarm" ? 10 : 20) >= (root.state == "alarm" ? 5 : 14);
+    width: root.size;
+    height: root.size;
+    for p in Assets.mark-pixels: Rectangle {
+        property <float> k: Math.clamp((root.build * 1.6 - p.y * 0.05 - Math.mod(p.x * 7 + p.y * 3, 5) * 0.03) / 0.3, 0, 1);
+        x: p.x * root.u;
+        y: p.y * root.u - (1 - self.k) * root.u * 4;
+        width: root.u + 0.6px;
+        height: root.u + 0.6px;
+        opacity: self.k;
+        background: p.c == 2 ? (root.core-off ? root.core.with-alpha(0.2) : root.core)
+            : p.y == root.scan-row ? Theme.signal
+            : p.y == root.scan-row - 1 ? (p.c == 0 ? Theme.mark-hi.mix(Theme.signal, 0.5) : Theme.mark-lo.mix(Theme.signal, 0.5))
+            : p.c == 0 ? Theme.mark-hi : Theme.mark-lo;
+    }
+}
+
+// ---------- controls ----------
+
+component Btn inherits Rectangle {
+    in property <string> text;
+    // primary | ghost | danger | quiet
+    in property <string> kind: "primary";
+    in property <bool> enabled: true;
+    in property <image> icon;
+    in property <bool> has-icon: false;
+    in property <bool> small: false;
+    callback clicked;
+    property <color> fill: !root.enabled ? Theme.raised : root.kind == "primary" ? (ta.has-hover ? Theme.accent.brighter(0.08) : Theme.accent) : root.kind == "danger" ? Theme.alarm : ta.has-hover ? Theme.raised : transparent;
+    property <color> edge: !root.enabled ? Theme.raised : root.kind == "ghost" ? (ta.has-hover ? Theme.fg-3 : Theme.line-strong) : root.kind == "quiet" ? transparent : root.fill;
+    property <color> ink: !root.enabled ? Theme.fg-3 : root.kind == "primary" ? Theme.on-accent : root.kind == "danger" ? Theme.bg : Theme.fg;
+    property <length> pad: root.small ? 10px : 16px;
+    min-width: label.preferred-width + 2 * root.pad + (root.has-icon ? 24px : 0px);
+    min-height: root.small ? 30px : 40px;
+    horizontal-stretch: 0;
+    vertical-stretch: 0;
+    Rectangle {
+        x: 0;
+        y: ta.pressed && root.enabled ? 2px : 0px;
+        width: root.width;
+        height: root.height;
+        background: root.fill;
+        animate background { duration: 90ms; }
+        Edges { x: 0; y: 0; width: parent.width; height: parent.height; edge: root.edge; }
+        if (root.kind == "primary" || root.kind == "danger") && root.enabled && !ta.pressed: Rectangle {
+            x: 0;
+            y: parent.height - 3px;
+            width: parent.width;
+            height: 3px;
+            background: #00000038;
+        }
+        HorizontalLayout {
+            padding-left: root.pad;
+            padding-right: root.pad;
+            spacing: 8px;
+            alignment: center;
+            if root.has-icon: VerticalLayout {
+                alignment: center;
+                Image { source: root.icon; width: 16px; height: 16px; colorize: root.ink; image-rendering: pixelated; }
+            }
+            label := Text {
+                text: root.text;
+                color: root.ink;
+                font-family: Theme.body;
+                font-size: root.small ? 12px : 14px;
+                font-weight: 600;
+                vertical-alignment: center;
+            }
+        }
+    }
+    ta := TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: root.enabled ? pointer : default;
+        clicked => {
+            root.clicked();
+        }
+    }
+}
+
+component Chip inherits Rectangle {
+    in property <string> text;
+    in property <color> tone: Theme.fg-2;
+    background: root.tone.with-alpha(0.14);
+    width: t.preferred-width + 28px;
+    height: 22px;
+    horizontal-stretch: 0;
+    vertical-stretch: 0;
+    Rectangle { x: 8px; y: (parent.height - 6px) / 2; width: 6px; height: 6px; background: root.tone; }
+    t := Text {
+        x: 20px;
+        y: (parent.height - self.height) / 2;
+        text: root.text;
+        color: root.tone;
+        font-family: Theme.mono;
+        font-size: 11px;
+        letter-spacing: 0.6px;
+    }
+}
+
+component Switch inherits Rectangle {
+    in property <bool> checked;
+    callback toggled(bool);
+    width: 44px;
+    height: 24px;
+    background: root.checked ? Theme.heat-1 : Theme.raised;
+    Edges { x: 0; y: 0; width: root.width; height: root.height; edge: root.checked ? Theme.accent : Theme.line-strong; }
+    Rectangle {
+        x: root.checked ? 24px : 4px;
+        y: 4px;
+        width: 16px;
+        height: 16px;
+        background: root.checked ? Theme.accent : Theme.fg-3;
+        animate x { duration: 120ms; easing: ease-out; }
+    }
+    TouchArea {
+        mouse-cursor: pointer;
+        clicked => {
+            root.toggled(!root.checked);
+        }
+    }
+}
+
+component Check inherits Rectangle {
+    in property <bool> checked;
+    callback toggled;
+    width: 20px;
+    height: 20px;
+    background: root.checked ? Theme.accent : Theme.bg;
+    Edges { x: 0; y: 0; width: root.width; height: root.height; edge: root.checked ? Theme.accent : Theme.line-strong; }
+    if root.checked: Image { x: 2px; y: 2px; width: 16px; height: 16px; source: Assets.i-check; colorize: Theme.on-accent; image-rendering: pixelated; }
+    TouchArea {
+        mouse-cursor: pointer;
+        clicked => {
+            root.toggled();
+        }
+    }
+}
+
+// 20 whole blocks. value 0..1, or below 0 while the total is still being counted.
+component Blocks inherits Rectangle {
+    in property <float> value;
+    in property <int> frame;
+    height: 18px;
+    property <int> sweep: Math.mod(Math.floor(root.frame / 2), 26) - 3;
+    for i in 20: Rectangle {
+        x: i * ((root.width - 19 * 4px) / 20 + 4px);
+        y: 0;
+        width: (root.width - 19 * 4px) / 20;
+        height: root.height;
+        background: root.value >= 0
+            ? (i < Math.floor(root.value * 20 + 0.001) ? Theme.accent : i == Math.floor(root.value * 20 + 0.001) && Math.mod(root.frame, 8) < 4 && root.value < 1 ? Theme.accent.with-alpha(0.45) : Theme.raised)
+            : (i <= root.sweep && i > root.sweep - 4 ? Theme.signal.with-alpha(1 - (root.sweep - i) * 0.28) : Theme.raised);
+    }
+}
+
+component PixelSpinner inherits Rectangle {
+    in property <int> frame;
+    in property <color> tone: Theme.accent;
+    width: 26px;
+    height: 26px;
+    property <int> step: Math.mod(root.frame, 8);
+    for i in 9: Rectangle {
+        // ring order around a 3 × 3 grid, center left empty
+        property <int> order: i == 0 ? 0 : i == 1 ? 1 : i == 2 ? 2 : i == 5 ? 3 : i == 8 ? 4 : i == 7 ? 5 : i == 6 ? 6 : i == 3 ? 7 : -1;
+        x: Math.mod(i, 3) * 9px;
+        y: Math.floor(i / 3) * 9px;
+        width: 8px;
+        height: 8px;
+        visible: self.order >= 0;
+        background: self.order == root.step ? root.tone : Math.mod(root.step - self.order + 8, 8) == 1 ? root.tone.with-alpha(0.5) : Theme.raised;
+    }
+}
+
+component Stat inherits Panel {
+    in property <string> label;
+    in property <string> value;
+    in property <color> tone: Theme.fg;
+    in property <bool> big: true;
+    VerticalLayout {
+        padding: 14px;
+        spacing: 6px;
+        Eyebrow { text: root.label; }
+        Text {
+            text: root.value;
+            font-family: root.big ? Theme.pixel : Theme.mono;
+            font-size: root.big ? 26px : 14px;
+            font-weight: 600;
+            color: root.tone;
+            overflow: elide;
+            animate color { duration: 200ms; }
+        }
+    }
+}
+
+component Heat inherits Rectangle {
+    in property <[int]> cells;
+    in property <length> cell: 11px;
+    in property <length> gap: 3px;
+    width: Math.ceil(root.cells.length / 7) * (root.cell + root.gap) - root.gap;
+    height: 7 * (root.cell + root.gap) - root.gap;
+    for v[i] in root.cells: Rectangle {
+        x: Math.floor(i / 7) * (root.cell + root.gap);
+        y: Math.mod(i, 7) * (root.cell + root.gap);
+        width: root.cell;
+        height: root.cell;
+        visible: v >= 0;
+        background: v == 5 ? Theme.alarm : v == 4 ? Theme.heat-4 : v == 3 ? Theme.heat-3 : v == 2 ? Theme.heat-2 : v == 1 ? Theme.heat-1 : Theme.heat-0;
+    }
+}
+
+component Legend inherits HorizontalLayout {
+    spacing: 4px;
+    alignment: start;
+    Mono { text: "Less "; color: Theme.fg-3; vertical-alignment: center; }
+    for c in [Theme.heat-0, Theme.heat-1, Theme.heat-2, Theme.heat-3, Theme.heat-4]: VerticalLayout {
+        alignment: center;
+        Rectangle { width: 10px; height: 10px; background: c; }
+    }
+    Mono { text: " More      "; color: Theme.fg-3; vertical-alignment: center; }
+    VerticalLayout {
+        alignment: center;
+        Rectangle { width: 10px; height: 10px; background: Theme.alarm; }
+    }
+    Mono { text: " Threat found"; color: Theme.fg-3; vertical-alignment: center; }
+}
+
+component NavItem inherits Rectangle {
+    in property <string> text;
+    in property <image> icon;
+    in property <bool> active;
+    in property <string> badge;
+    in property <color> badge-tone: Theme.alarm;
+    callback clicked;
+    height: 40px;
+    background: root.active ? Theme.raised : ta.has-hover ? Theme.raised.with-alpha(0.55) : transparent;
+    animate background { duration: 120ms; }
+    Rectangle {
+        x: 0;
+        y: 0;
+        width: root.active ? 3px : 0px;
+        height: root.height;
+        background: Theme.accent;
+        animate width { duration: 120ms; }
+    }
+    Image {
+        x: 18px;
+        y: (parent.height - 18px) / 2;
+        width: 18px;
+        height: 18px;
+        source: root.icon;
+        colorize: root.active ? Theme.accent : Theme.fg-2;
+        image-rendering: pixelated;
+    }
+    Text {
+        x: 48px;
+        y: 0;
+        height: parent.height;
+        vertical-alignment: center;
+        text: root.text;
+        color: root.active ? Theme.fg : Theme.fg-2;
+        font-family: Theme.body;
+        font-size: 13px;
+        font-weight: root.active ? 600 : 500;
+    }
+    if root.badge != "": Chip {
+        x: parent.width - self.width - 12px;
+        y: (parent.height - self.height) / 2;
+        text: root.badge;
+        tone: root.badge-tone;
+    }
+    ta := TouchArea {
+        mouse-cursor: pointer;
+        clicked => {
+            root.clicked();
+        }
+    }
+}
+
+component Seg inherits HorizontalLayout {
+    in property <[string]> options;
+    in property <string> value;
+    callback picked(string);
+    spacing: 8px;
+    alignment: end;
+    for o in root.options: Btn {
+        text: o;
+        small: true;
+        kind: o == root.value ? "primary" : "ghost";
+        clicked => {
+            root.picked(o);
+        }
+    }
+}
+
+component SettingRow inherits Rectangle {
+    in property <string> title;
+    in property <string> text;
+    in property <bool> last: false;
+    min-height: 70px;
+    HorizontalLayout {
+        padding: 16px;
+        padding-left: 18px;
+        spacing: 24px;
+        VerticalLayout {
+            alignment: center;
+            spacing: 4px;
+            horizontal-stretch: 1;
+            Text { text: root.title; font-family: Theme.body; font-size: 14px; font-weight: 600; color: Theme.fg; }
+            Body { text: root.text; font-size: 13px; }
+        }
+        VerticalLayout {
+            alignment: center;
+            @children
+        }
+    }
+    if !root.last: Rectangle { x: 0; y: parent.height - 2px; width: parent.width; height: 2px; background: Theme.line; }
+}
+
+component Header inherits VerticalLayout {
+    in property <string> eyebrow;
+    in property <string> title;
+    in property <string> text;
+    spacing: 6px;
+    Eyebrow { text: root.eyebrow; }
+    Title { text: root.title; }
+    if root.text != "": Body { text: root.text; }
+}
+
+component Empty inherits Panel {
+    in property <image> icon;
+    in property <string> title;
+    in property <string> text;
+    height: 190px;
+    Rectangle {
+        // dot dither, the brand's one texture
+        for i in 120: Rectangle {
+            x: Math.mod(i, 20) * (root.width / 20) + 6px;
+            y: Math.floor(i / 20) * (root.height / 6) + 10px;
+            width: 2px;
+            height: 2px;
+            background: Theme.line;
+        }
+    }
+    VerticalLayout {
+        alignment: center;
+        spacing: 8px;
+        HorizontalLayout {
+            alignment: center;
+            Image { source: root.icon; width: 40px; height: 40px; colorize: Theme.fg-3; image-rendering: pixelated; }
+        }
+        Text { text: root.title; horizontal-alignment: center; font-family: Theme.body; font-size: 15px; font-weight: 600; color: Theme.fg; }
+        Text { text: root.text; horizontal-alignment: center; font-family: Theme.body; font-size: 13px; color: Theme.fg-3; }
+    }
+}
+
+// Slides and fades a screen in when it appears.
+component Screen inherits Rectangle {
+    property <bool> shown: false;
+    y: self.shown ? 0px : 12px;
+    opacity: self.shown ? 1 : 0;
+    animate y { duration: 220ms; easing: ease-out; }
+    animate opacity { duration: 180ms; }
+    init => {
+        self.shown = true;
+    }
+    @children
+}
+
+component ScanCard inherits Panel {
+    in property <image> icon;
+    in property <string> title;
+    in property <string> text;
+    in property <string> meta;
+    in property <bool> selected;
+    in property <bool> enabled: true;
+    callback clicked;
+    fill: root.selected ? Theme.raised : ta.has-hover && root.enabled ? Theme.raised.with-alpha(0.6) : Theme.surface;
+    edge: root.selected ? Theme.accent : ta.has-hover && root.enabled ? Theme.line-strong : Theme.line;
+    raised: root.selected;
+    min-height: 132px;
+    VerticalLayout {
+        padding: 18px;
+        spacing: 8px;
+        HorizontalLayout {
+            spacing: 10px;
+            Image { source: root.icon; width: 24px; height: 24px; colorize: root.selected ? Theme.accent : Theme.fg-2; image-rendering: pixelated; }
+            Text { text: root.title; font-family: Theme.pixel; font-size: 20px; color: Theme.fg; vertical-alignment: center; }
+            Rectangle { horizontal-stretch: 1; }
+            Mono { text: root.meta; color: Theme.fg-3; font-size: 11px; vertical-alignment: center; }
+        }
+        Body { text: root.text; font-size: 13px; }
+    }
+    ta := TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: root.enabled ? pointer : default;
+        clicked => {
+            root.clicked();
+        }
+    }
+}
+
+component WinButton inherits Rectangle {
+    // min | max | close
+    in property <string> kind;
+    in property <bool> is-max;
+    callback clicked;
+    width: 46px;
+    background: ta.has-hover ? (root.kind == "close" ? Theme.alarm : Theme.raised) : transparent;
+    property <color> ink: ta.has-hover && root.kind == "close" ? #FFFFFF : Theme.fg-2;
+    if root.kind == "min": Rectangle { x: (parent.width - 10px) / 2; y: parent.height / 2; width: 10px; height: 2px; background: root.ink; }
+    if root.kind == "max" && !root.is-max: Rectangle {
+        x: (parent.width - 10px) / 2;
+        y: (parent.height - 10px) / 2;
+        width: 10px;
+        height: 10px;
+        border-width: 2px;
+        border-color: root.ink;
+    }
+    if root.kind == "max" && root.is-max: Rectangle {
+        x: (parent.width - 10px) / 2;
+        y: (parent.height - 10px) / 2;
+        width: 10px;
+        height: 10px;
+        Rectangle { x: 2px; y: 0; width: 8px; height: 8px; border-width: 2px; border-color: root.ink; }
+        Rectangle { x: 0; y: 3px; width: 8px; height: 7px; border-width: 2px; border-color: root.ink; background: ta.has-hover ? Theme.raised : Theme.surface; }
+    }
+    if root.kind == "close": Path {
+        x: (parent.width - 10px) / 2;
+        y: (parent.height - 10px) / 2;
+        width: 10px;
+        height: 10px;
+        viewbox-width: 10;
+        viewbox-height: 10;
+        commands: "M 0 0 L 10 10 M 10 0 L 0 10";
+        stroke: root.ink;
+        stroke-width: 2px;
+    }
+    ta := TouchArea {
+        clicked => {
+            root.clicked();
+        }
+    }
+}
+
+component ResizeEdge inherits TouchArea {
+    in property <string> dir;
+    callback resize(string);
+    pointer-event(e) => {
+        if e.kind == PointerEventKind.down && e.button == PointerEventButton.left {
+            root.resize(root.dir);
+        }
+    }
+}
+
+// ---------- the window ----------
+
+export component AppWindow inherits Window {
+    title: "Hexward";
+    icon: root.app-icon;
+    no-frame: true;
+    preferred-width: 1240px;
+    preferred-height: 800px;
+    min-width: 1000px;
+    min-height: 680px;
+    background: Theme.bg;
+    default-font-family: Theme.body;
+
+    in property <image> app-icon;
+    in property <string> version;
+    in-out property <string> page: "home";
+    in property <bool> is-max;
+    in property <bool> engine-ready;
+    in property <string> engine-status: "Loading rules…";
+    in property <string> rules-count: "…";
+    in property <bool> needs-rules;
+
+    // Motion
+    in-out property <int> frame;
+    in-out property <float> boot: 0;
+    in property <bool> flash;
+    animate boot { duration: 1500ms; easing: linear; }
+
+    // Home
+    in property <string> home-state: "warn";
+    in property <string> home-chip: "NOT SCANNED YET";
+    in property <string> home-title: "No scan yet";
+    in property <string> home-text;
+    in property <[StatItem]> home-stats;
+    in property <[StatusRow]> status-rows;
+    in property <[int]> heat-short;
+    in property <[int]> heat-year;
+
+    // Scan
+    in-out property <string> scan-choice: "quick";
+    in property <[DriveRow]> drives;
+    in property <[string]> folders;
+    in property <bool> scanning;
+    in property <bool> paused;
+    in property <bool> scan-started;
+    in property <string> scan-kind: "QUICK SCAN";
+    in property <string> scan-title;
+    in property <string> scan-text;
+    in property <string> scan-path;
+    in property <string> scan-bytes;
+    in property <string> scan-files: "0";
+    in property <int> scan-threats;
+    in property <string> scan-speed: "0";
+    in property <string> scan-time: "0:00";
+    in property <float> scan-fraction: -1;
+    in property <[int]> grid-cells;
+
+    // Results
+    in property <[ThreatRow]> threats;
+    in property <string> results-title: "No results yet";
+    in property <string> results-text: "Run a scan and anything it finds shows up here.";
+    in property <int> selected-count;
+    in property <int> open-count;
+
+    // Startup
+    in property <[StartupRow]> startup-rows;
+    in property <[DisabledRow]> disabled-rows;
+    in property <string> startup-summary;
+    in property <bool> startup-busy;
+    in property <bool> startup-checked;
+    in property <bool> startup-show-all;
+
+    // Quarantine, history, allow list
+    in property <[VaultRow]> vault-rows;
+    in property <[EventRow]> events;
+    in property <[AllowRow]> allow-rows;
+
+    // Settings
+    in property <int> max-size-mb: 64;
+    in property <bool> quarantine-suspicious;
+    in property <bool> close-to-tray: true;
+    in property <string> pack: "core";
+    in property <bool> updating;
+    in property <string> rules-info;
+    in property <string> bazaar-info;
+    in property <string> data-dir;
+
+    // App updates
+    in property <bool> app-update-available;
+    in property <string> app-update-version;
+    in property <string> app-update-notes;
+    in property <bool> app-update-busy;
+    in property <string> app-update-status;
+
+    // Toast
+    in property <bool> toast-visible;
+    in property <string> toast-title;
+    in property <string> toast-text;
+    in property <string> toast-state: "safe";
+
+    callback navigate(string);
+    callback start-scan(string);
+    callback pause-scan();
+    callback stop-scan();
+    callback toggle-drive(int);
+    callback add-folder();
+    callback remove-folder(int);
+    callback toggle-threat(int);
+    callback quarantine-selected();
+    callback quarantine-one(int);
+    callback ask-delete(int);
+    callback cancel-delete(int);
+    callback delete-one(int);
+    callback allow-one(int);
+    callback check-startup();
+    callback set-show-all(bool);
+    callback disable-startup(int);
+    callback restore-startup(string);
+    callback vault-restore(string);
+    callback vault-ask(int);
+    callback vault-cancel(int);
+    callback vault-delete(string);
+    callback allow-remove(string);
+    callback update-rules();
+    callback set-dark(bool);
+    callback set-max-size(string);
+    callback set-quarantine-suspicious(bool);
+    callback set-close-to-tray(bool);
+    callback set-pack(string);
+    callback open-data-dir();
+    callback check-app-update();
+    callback install-app-update();
+    callback drag-window();
+    callback resize-window(string);
+    callback minimize-window();
+    callback toggle-maximize();
+    callback close-window();
+
+    property <bool> moving: root.scanning || root.boot < 1 || root.flash || root.startup-busy || root.updating || root.app-update-busy || root.home-state == "alarm";
+    Timer {
+        interval: 33ms;
+        running: root.moving;
+        triggered => {
+            root.frame += 1;
+        }
+    }
+    // The idle heartbeat: two blinks of the core every 4 seconds while protected.
+    property <int> beat;
+    Timer {
+        interval: 200ms;
+        running: !root.moving && root.page == "home";
+        triggered => {
+            root.beat = Math.mod(root.beat + 1, 20);
+        }
+    }
+    init => {
+        root.boot = 1;
+    }
+
+    function go(p: string) {
+        root.page = p;
+        root.navigate(p);
+    }
+
+    property <string> page-name: root.page == "home" ? "HOME" : root.page == "scan" ? "SCAN" : root.page == "results" ? "RESULTS" : root.page == "startup" ? "STARTUP" : root.page == "vault" ? "QUARANTINE" : root.page == "history" ? "HISTORY" : root.page == "settings" ? "SETTINGS" : "ABOUT";
+
+    VerticalLayout {
+        // ---------- title bar ----------
+        Rectangle {
+            height: 46px;
+            background: Theme.surface;
+            HorizontalLayout {
+                Rectangle {
+                    width: 232px;
+                    HorizontalLayout {
+                        padding-left: 18px;
+                        spacing: 10px;
+                        alignment: start;
+                        VerticalLayout {
+                            alignment: center;
+                            PixelMark { size: 26px; build: root.boot; state: root.scanning ? "scan" : "brand"; blink: root.scanning && !root.paused; frame: root.frame; }
+                        }
+                        VerticalLayout {
+                            alignment: center;
+                            Image { source: Assets.wordmark; height: 14px; width: 82px; colorize: Theme.fg; image-rendering: pixelated; }
+                        }
+                    }
+                    TouchArea {
+                        pointer-event(e) => {
+                            if e.kind == PointerEventKind.down && e.button == PointerEventButton.left {
+                                root.drag-window();
+                            }
+                        }
+                        double-clicked => { root.toggle-maximize(); }
+                    }
+                }
+                Rectangle {
+                    horizontal-stretch: 1;
+                    TouchArea {
+                        pointer-event(e) => {
+                            if e.kind == PointerEventKind.down && e.button == PointerEventButton.left {
+                                root.drag-window();
+                            }
+                        }
+                        double-clicked => { root.toggle-maximize(); }
+                    }
+                    HorizontalLayout {
+                        padding-left: 26px;
+                        spacing: 12px;
+                        alignment: start;
+                        VerticalLayout {
+                            alignment: center;
+                            Eyebrow { text: root.page-name; color: Theme.fg-2; }
+                        }
+                        if root.scanning: VerticalLayout {
+                            alignment: center;
+                            Chip { text: root.paused ? "PAUSED" : "SCANNING · " + root.scan-files; tone: Theme.signal; }
+                        }
+                    }
+                }
+                if root.app-update-available: VerticalLayout {
+                    alignment: center;
+                    padding-right: 10px;
+                    Btn {
+                        text: root.app-update-busy ? "Updating…" : "Update to " + root.app-update-version;
+                        small: true;
+                        enabled: !root.app-update-busy;
+                        has-icon: true;
+                        icon: Assets.i-update;
+                        clicked => { root.install-app-update(); }
+                    }
+                }
+                WinButton { kind: "min"; clicked => { root.minimize-window(); } }
+                WinButton { kind: "max"; is-max: root.is-max; clicked => { root.toggle-maximize(); } }
+                WinButton { kind: "close"; clicked => { root.close-window(); } }
+            }
+            Rectangle { x: 0; y: parent.height - 2px; width: parent.width; height: 2px; background: Theme.line; }
+        }
+
+        HorizontalLayout {
+            // ---------- sidebar ----------
+            Rectangle {
+                width: 232px;
+                background: Theme.surface;
+                VerticalLayout {
+                    padding-top: 16px;
+                    padding-bottom: 14px;
+                    spacing: 2px;
+                    NavItem { text: "Home"; icon: Assets.i-shield; active: root.page == "home"; clicked => { root.go("home"); } }
+                    NavItem {
+                        text: "Scan";
+                        icon: Assets.i-scan;
+                        active: root.page == "scan";
+                        badge: root.scanning ? (root.scan-fraction >= 0 ? Math.floor(root.scan-fraction * 100) + "%" : "…") : "";
+                        badge-tone: Theme.signal;
+                        clicked => { root.go("scan"); }
+                    }
+                    NavItem { text: "Results"; icon: Assets.i-bug; active: root.page == "results"; badge: root.open-count > 0 ? root.open-count : ""; clicked => { root.go("results"); } }
+                    NavItem { text: "Startup"; icon: Assets.i-bolt; active: root.page == "startup"; clicked => { root.go("startup"); } }
+                    NavItem { text: "Quarantine"; icon: Assets.i-vault; active: root.page == "vault"; badge: root.vault-rows.length > 0 ? root.vault-rows.length : ""; badge-tone: Theme.fg-3; clicked => { root.go("vault"); } }
+                    NavItem { text: "History"; icon: Assets.i-clock; active: root.page == "history"; clicked => { root.go("history"); } }
+                    Rectangle { vertical-stretch: 1; }
+                    NavItem { text: "Settings"; icon: Assets.i-gear; active: root.page == "settings"; clicked => { root.go("settings"); } }
+                    NavItem { text: "About"; icon: Assets.i-info; active: root.page == "about"; badge: root.app-update-available ? "NEW" : ""; badge-tone: Theme.accent; clicked => { root.go("about"); } }
+                    HorizontalLayout {
+                        padding-left: 18px;
+                        padding-top: 14px;
+                        spacing: 8px;
+                        alignment: start;
+                        VerticalLayout {
+                            alignment: center;
+                            Rectangle {
+                                width: 6px;
+                                height: 6px;
+                                background: root.engine-ready ? Theme.accent : Theme.amber;
+                                opacity: root.engine-ready || Math.mod(root.frame, 16) < 10 ? 1 : 0.3;
+                            }
+                        }
+                        Mono { text: root.engine-status; font-size: 11px; color: Theme.fg-3; }
+                    }
+                }
+            }
+            Rectangle { width: 2px; background: Theme.line; }
+
+            // ---------- screens ----------
+            Rectangle {
+                horizontal-stretch: 1;
+                clip: true;
+
+                // HOME
+                if root.page == "home": Screen {
+                    VerticalLayout {
+                        padding: 34px;
+                        padding-top: 30px;
+                        spacing: 22px;
+                        alignment: start;
+                        if root.app-update-available: Panel {
+                            edge: Theme.accent;
+                            HorizontalLayout {
+                                padding: 14px;
+                                padding-left: 18px;
+                                spacing: 14px;
+                                VerticalLayout { alignment: center; Chip { text: "UPDATE"; tone: Theme.accent; } }
+                                VerticalLayout {
+                                    alignment: center;
+                                    horizontal-stretch: 1;
+                                    Text { text: "Hexward " + root.app-update-version + " is ready"; font-family: Theme.body; font-size: 14px; font-weight: 600; color: Theme.fg; }
+                                    Mono { text: root.app-update-notes; color: Theme.fg-3; }
+                                }
+                                Btn { text: root.app-update-busy ? "Updating…" : "Update and restart"; enabled: !root.app-update-busy; small: true; clicked => { root.install-app-update(); } }
+                            }
+                        }
+                        Panel {
+                            raised: true;
+                            HorizontalLayout {
+                                padding: 28px;
+                                spacing: 30px;
+                                VerticalLayout {
+                                    alignment: center;
+                                    PixelMark {
+                                        size: 128px;
+                                        build: root.boot;
+                                        state: root.home-state;
+                                        blink: root.home-state == "alarm" || (root.home-state == "safe" && !root.moving);
+                                        frame: root.home-state == "alarm" ? root.frame : root.beat;
+                                    }
+                                }
+                                VerticalLayout {
+                                    alignment: center;
+                                    spacing: 10px;
+                                    HorizontalLayout {
+                                        alignment: start;
+                                        Chip { text: root.home-chip; tone: Theme.tone(root.home-state); }
+                                    }
+                                    Text { text: root.home-title; font-family: Theme.pixel; font-size: 36px; font-weight: 600; color: Theme.fg; }
+                                    Body { text: root.home-text; }
+                                    HorizontalLayout {
+                                        padding-top: 8px;
+                                        spacing: 14px;
+                                        alignment: start;
+                                        Btn { text: "Quick scan"; has-icon: true; icon: Assets.i-scan; enabled: root.engine-ready && !root.scanning; clicked => { root.go("scan"); root.start-scan("quick"); } }
+                                        Btn { text: "More scans"; kind: "ghost"; clicked => { root.go("scan"); } }
+                                        if root.needs-rules: Btn { text: root.updating ? "Downloading…" : "Download rules"; kind: "ghost"; enabled: !root.updating; has-icon: true; icon: Assets.i-update; clicked => { root.update-rules(); } }
+                                    }
+                                }
+                            }
+                        }
+                        HorizontalLayout {
+                            spacing: 16px;
+                            for s in root.home-stats: Stat { label: s.label; value: s.value; }
+                        }
+                        HorizontalLayout {
+                            spacing: 16px;
+                            Panel {
+                                horizontal-stretch: 3;
+                                VerticalLayout {
+                                    padding: 18px;
+                                    spacing: 14px;
+                                    HorizontalLayout {
+                                        Text { text: "Threat map"; font-family: Theme.body; font-size: 14px; font-weight: 600; color: Theme.fg; }
+                                        Rectangle { horizontal-stretch: 1; }
+                                        Mono { text: "26 weeks · a square per day"; color: Theme.fg-3; }
+                                    }
+                                    Heat { cells: root.heat-short; }
+                                    Legend { }
+                                }
+                            }
+                            Panel {
+                                horizontal-stretch: 2;
+                                VerticalLayout {
+                                    padding: 18px;
+                                    spacing: 10px;
+                                    Text { text: "Protection"; font-family: Theme.body; font-size: 14px; font-weight: 600; color: Theme.fg; }
+                                    for r in root.status-rows: HorizontalLayout {
+                                        spacing: 10px;
+                                        VerticalLayout {
+                                            alignment: center;
+                                            Rectangle { width: 8px; height: 8px; background: Theme.tone(r.tone); }
+                                        }
+                                        Text { text: r.name; font-family: Theme.body; font-size: 13px; color: Theme.fg; vertical-alignment: center; }
+                                        Rectangle { horizontal-stretch: 1; }
+                                        Mono { text: r.value; color: Theme.fg-3; vertical-alignment: center; }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // SCAN · choose
+                if root.page == "scan" && !root.scan-started: Screen {
+                    ScrollView {
+                        VerticalLayout {
+                            padding: 34px;
+                            padding-top: 30px;
+                            spacing: 20px;
+                            alignment: start;
+                            Header { eyebrow: "SCAN"; title: "Choose a scan"; text: "Every scan only reports at first. Nothing is moved or deleted until you decide."; }
+                            GridLayout {
+                                spacing: 16px;
+                                Row {
+                                    ScanCard { icon: Assets.i-scan; title: "Quick"; meta: "~1 MIN"; text: "Downloads, Desktop, Temp, everything that starts with Windows, and every running program."; selected: root.scan-choice == "quick"; clicked => { root.scan-choice = "quick"; } }
+                                    ScanCard { icon: Assets.i-shield; title: "System"; meta: "~10 MIN"; text: "Windows system files, Program Files, ProgramData and the quick-scan places. Checks the core of your PC."; selected: root.scan-choice == "system"; clicked => { root.scan-choice = "system"; } }
+                                }
+                                Row {
+                                    ScanCard { icon: Assets.i-disk; title: "Full"; meta: "30+ MIN"; text: "Every file on every local disk. The deepest check, best run when you're away."; selected: root.scan-choice == "full"; clicked => { root.scan-choice = "full"; } }
+                                    ScanCard { icon: Assets.i-folder; title: "Custom"; meta: "YOU PICK"; text: "Tick any drives, add any folders or projects, and scan them together."; selected: root.scan-choice == "custom"; clicked => { root.scan-choice = "custom"; } }
+                                }
+                            }
+                            if root.scan-choice == "custom": Panel {
+                                VerticalLayout {
+                                    padding: 18px;
+                                    spacing: 12px;
+                                    Eyebrow { text: "DRIVES"; }
+                                    for d[i] in root.drives: Rectangle {
+                                        height: 46px;
+                                        HorizontalLayout {
+                                            spacing: 14px;
+                                            VerticalLayout { alignment: center; Check { checked: d.selected; toggled => { root.toggle-drive(i); } } }
+                                            VerticalLayout { alignment: center; Image { source: Assets.i-disk; width: 20px; height: 20px; colorize: Theme.fg-2; image-rendering: pixelated; } }
+                                            VerticalLayout {
+                                                alignment: center;
+                                                width: 330px;
+                                                Text { text: d.root + "  " + d.label; font-family: Theme.body; font-size: 14px; font-weight: 600; color: Theme.fg; overflow: elide; }
+                                                Mono { text: d.info; color: Theme.fg-3; font-size: 11px; }
+                                            }
+                                            VerticalLayout {
+                                                alignment: center;
+                                                horizontal-stretch: 1;
+                                                Rectangle {
+                                                    height: 8px;
+                                                    background: Theme.raised;
+                                                    Rectangle { x: 0; width: parent.width * d.usage; height: parent.height; background: d.usage > 0.9 ? Theme.amber : Theme.heat-3; }
+                                                }
+                                            }
+                                        }
+                                        TouchArea { x: 0; width: 60px; clicked => { root.toggle-drive(i); } }
+                                    }
+                                    Eyebrow { text: "FOLDERS AND PROJECTS"; }
+                                    if root.folders.length == 0: Body { text: "No folders added. Add a project, a download folder, a USB stick folder: anything."; font-size: 13px; }
+                                    for f[i] in root.folders: HorizontalLayout {
+                                        spacing: 12px;
+                                        VerticalLayout { alignment: center; Image { source: Assets.i-folder; width: 18px; height: 18px; colorize: Theme.fg-2; image-rendering: pixelated; } }
+                                        Mono { text: f; vertical-alignment: center; horizontal-stretch: 1; }
+                                        Btn { text: "Remove"; kind: "quiet"; small: true; clicked => { root.remove-folder(i); } }
+                                    }
+                                    HorizontalLayout {
+                                        alignment: start;
+                                        Btn { text: "Add folder…"; kind: "ghost"; small: true; has-icon: true; icon: Assets.i-folder; clicked => { root.add-folder(); } }
+                                    }
+                                }
+                            }
+                            HorizontalLayout {
+                                alignment: start;
+                                spacing: 14px;
+                                Btn {
+                                    text: root.scan-choice == "quick" ? "Start quick scan" : root.scan-choice == "system" ? "Start system scan" : root.scan-choice == "full" ? "Start full scan" : "Scan selected";
+                                    has-icon: true;
+                                    icon: Assets.i-scan;
+                                    enabled: root.engine-ready;
+                                    clicked => { root.start-scan(root.scan-choice); }
+                                }
+                                if !root.engine-ready: VerticalLayout { alignment: center; Chip { text: "LOADING RULES"; tone: Theme.signal; } }
+                            }
+                        }
+                    }
+                }
+
+                // SCAN · running / finished
+                if root.page == "scan" && root.scan-started: Screen {
+                    HorizontalLayout {
+                        padding: 34px;
+                        padding-top: 30px;
+                        spacing: 26px;
+                        // The scanner
+                        VerticalLayout {
+                        alignment: start;
+                        Panel {
+                            width: 330px;
+                            raised: true;
+                            edge: root.flash ? (Math.mod(root.frame, 4) < 2 ? Theme.alarm : Theme.line) : Theme.line;
+                            VerticalLayout {
+                                padding: 24px;
+                                spacing: 18px;
+                                Rectangle {
+                                    height: 250px;
+                                    property <length> cx: self.width / 2;
+                                    property <length> cy: self.height / 2;
+                                    // orbiting pixels, snapped to a 4 px grid
+                                    for i in 12: Rectangle {
+                                        property <angle> a: (root.frame * 3 + i * 30) * 1deg;
+                                        property <length> r: 108px + (Math.mod(i, 2) == 0 ? 0px : 10px);
+                                        x: Math.round((parent.cx + self.r * Math.cos(self.a)) / 4px) * 4px - 3px;
+                                        y: Math.round((parent.cy + self.r * Math.sin(self.a) * 0.92) / 4px) * 4px - 3px;
+                                        width: Math.mod(i, 3) == 0 ? 8px : 6px;
+                                        height: self.width;
+                                        visible: root.scanning && !root.paused;
+                                        background: root.scan-threats > 0 && Math.mod(i, 4) == 0 ? Theme.alarm : i == 0 ? Theme.oxide : Theme.signal.with-alpha(0.35 + Math.mod(i, 3) * 0.25);
+                                    }
+                                    PixelMark {
+                                        x: parent.cx - self.width / 2 + (root.flash ? (Math.mod(root.frame, 2) == 0 ? 4px : -4px) : 0px);
+                                        y: parent.cy - self.height / 2;
+                                        size: 160px;
+                                        state: root.scanning ? (root.scan-threats > 0 ? "alarm" : "scan") : root.scan-threats > 0 ? "alarm" : "safe";
+                                        blink: root.scanning && !root.paused;
+                                        scan-row: root.scanning && !root.paused ? Math.mod(Math.floor(root.frame / 2), 20) - 2 : -1;
+                                        frame: root.frame;
+                                    }
+                                }
+                                VerticalLayout {
+                                    spacing: 6px;
+                                    Eyebrow { text: root.scanning ? (root.paused ? "PAUSED" : "READING") : "DONE"; color: root.scanning ? Theme.signal : Theme.fg-3; }
+                                    Text { text: root.scan-bytes; font-family: Theme.mono; font-size: 13px; color: Theme.fg; letter-spacing: 1px; }
+                                    Mono { text: root.scan-path; color: Theme.fg-3; font-size: 11px; }
+                                }
+                            }
+                        }
+                        }
+                        // Numbers and controls
+                        VerticalLayout {
+                            spacing: 20px;
+                            alignment: start;
+                            horizontal-stretch: 1;
+                            Header { eyebrow: root.scan-kind; title: root.scan-title; text: root.scan-text; }
+                            Blocks { value: root.scan-fraction; frame: root.frame; }
+                            HorizontalLayout {
+                                spacing: 14px;
+                                Stat { label: "FILES CHECKED"; value: root.scan-files; }
+                                Stat { label: "FOUND"; value: root.scan-threats; tone: root.scan-threats > 0 ? Theme.alarm : Theme.fg; }
+                                Stat { label: "FILES / SEC"; value: root.scan-speed; }
+                                Stat { label: "TIME"; value: root.scan-time; }
+                            }
+                            Panel {
+                                VerticalLayout {
+                                    padding: 16px;
+                                    spacing: 10px;
+                                    HorizontalLayout {
+                                        Eyebrow { text: "PROGRESS MAP"; }
+                                        Rectangle { horizontal-stretch: 1; }
+                                        Mono { text: "one square ≈ 1/288 of the scan"; color: Theme.fg-3; font-size: 11px; }
+                                    }
+                                    Rectangle {
+                                        height: 6 * 13px;
+                                        for c[i] in root.grid-cells: Rectangle {
+                                            x: Math.mod(i, 48) * (parent.width / 48);
+                                            y: Math.floor(i / 48) * 13px;
+                                            width: parent.width / 48 - 3px;
+                                            height: 10px;
+                                            background: c == 3 ? Theme.alarm : c == 2 ? Theme.signal : c == 1 ? Theme.heat-2 : Theme.raised;
+                                        }
+                                    }
+                                }
+                            }
+                            HorizontalLayout {
+                                spacing: 14px;
+                                alignment: start;
+                                if root.scanning: Btn { text: root.paused ? "Resume" : "Pause"; kind: "ghost"; clicked => { root.pause-scan(); } }
+                                if root.scanning: Btn { text: "Stop"; kind: "ghost"; clicked => { root.stop-scan(); } }
+                                if !root.scanning && root.scan-threats > 0: Btn { text: "Review results"; kind: "danger"; has-icon: true; icon: Assets.i-bug; clicked => { root.go("results"); } }
+                                if !root.scanning: Btn { text: "New scan"; kind: root.scan-threats > 0 ? "ghost" : "primary"; clicked => { root.navigate("scan-new"); } }
+                                if !root.scanning: Btn { text: "Home"; kind: "ghost"; clicked => { root.go("home"); } }
+                            }
+                        }
+                    }
+                }
+
+                // RESULTS
+                if root.page == "results": Screen {
+                    VerticalLayout {
+                        padding: 34px;
+                        padding-top: 30px;
+                        spacing: 20px;
+                        Header { eyebrow: "SCAN RESULTS"; title: root.results-title; text: root.results-text; }
+                        if root.threats.length == 0: Empty { icon: Assets.i-shield; title: "Nothing to show"; text: "Results from your next scan appear here."; }
+                        if root.threats.length > 0: ScrollView {
+                            vertical-stretch: 1;
+                            VerticalLayout {
+                                padding: 4px;
+                                spacing: 12px;
+                                alignment: start;
+                                for t[i] in root.threats: Panel {
+                                    fill: t.done ? Theme.bg : Theme.surface;
+                                    edge: t.done ? Theme.line : t.tone == "alarm" ? Theme.alarm.with-alpha(0.55) : Theme.line;
+                                    HorizontalLayout {
+                                        padding: 16px;
+                                        spacing: 14px;
+                                        VerticalLayout {
+                                            alignment: start;
+                                            if !t.done: Check { checked: t.selected; toggled => { root.toggle-threat(i); } }
+                                            if t.done: Image { source: Assets.i-check; width: 20px; height: 20px; colorize: Theme.accent; image-rendering: pixelated; }
+                                        }
+                                        VerticalLayout {
+                                            spacing: 4px;
+                                            horizontal-stretch: 1;
+                                            HorizontalLayout {
+                                                spacing: 10px;
+                                                Text { text: t.name; font-family: Theme.mono; font-size: 13px; font-weight: 600; color: t.done ? Theme.fg-3 : Theme.fg; overflow: elide; horizontal-stretch: 1; }
+                                                Chip { text: t.chip; tone: Theme.tone(t.tone); }
+                                            }
+                                            Body { text: t.description; font-size: 13px; }
+                                            Mono { text: t.path; color: Theme.fg-3; }
+                                            if !t.done && !t.confirm-delete: HorizontalLayout {
+                                                padding-top: 6px;
+                                                spacing: 10px;
+                                                alignment: start;
+                                                Btn { text: "Quarantine"; small: true; has-icon: true; icon: Assets.i-vault; clicked => { root.quarantine-one(i); } }
+                                                Btn { text: "Delete"; kind: "ghost"; small: true; has-icon: true; icon: Assets.i-trash; clicked => { root.ask-delete(i); } }
+                                                Btn { text: "Allow"; kind: "ghost"; small: true; has-icon: true; icon: Assets.i-check; clicked => { root.allow-one(i); } }
+                                            }
+                                            if !t.done && t.confirm-delete: HorizontalLayout {
+                                                padding-top: 6px;
+                                                spacing: 10px;
+                                                alignment: start;
+                                                VerticalLayout { alignment: center; Body { text: "Delete this file forever? It can't be restored."; font-size: 12px; color: Theme.alarm; wrap: no-wrap; } }
+                                                Btn { text: "Delete forever"; kind: "danger"; small: true; clicked => { root.delete-one(i); } }
+                                                Btn { text: "Cancel"; kind: "ghost"; small: true; clicked => { root.cancel-delete(i); } }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        if root.threats.length > 0 && root.open-count > 0: HorizontalLayout {
+                            spacing: 14px;
+                            alignment: start;
+                            Btn { text: "Quarantine " + root.selected-count + " selected"; enabled: root.selected-count > 0; has-icon: true; icon: Assets.i-vault; clicked => { root.quarantine-selected(); } }
+                            VerticalLayout { alignment: center; Mono { text: "Allow = trust this exact file from now on. You can undo it in Settings."; color: Theme.fg-3; } }
+                        }
+                    }
+                }
+
+                // STARTUP
+                if root.page == "startup": Screen {
+                    VerticalLayout {
+                        padding: 34px;
+                        padding-top: 30px;
+                        spacing: 20px;
+                        Header { eyebrow: "STARTUP"; title: "What starts with Windows"; text: "Programs that start on their own are a favorite hiding place. Hexward checks each one and can switch entries off. Every change can be undone."; }
+                        HorizontalLayout {
+                            spacing: 14px;
+                            alignment: start;
+                            Btn { text: root.startup-busy ? "Checking…" : root.startup-checked ? "Check again" : "Check startup items"; enabled: root.engine-ready && !root.startup-busy; has-icon: true; icon: Assets.i-bolt; clicked => { root.check-startup(); } }
+                            if root.startup-checked: Btn { text: root.startup-show-all ? "Problems only" : "Show everything"; kind: "ghost"; clicked => { root.set-show-all(!root.startup-show-all); } }
+                            if root.startup-busy: VerticalLayout { alignment: center; PixelSpinner { frame: root.frame; } }
+                            VerticalLayout { alignment: center; Body { text: root.startup-summary; font-size: 13px; } }
+                        }
+                        ScrollView {
+                            vertical-stretch: 1;
+                            VerticalLayout {
+                                padding: 4px;
+                                spacing: 12px;
+                                alignment: start;
+                                if root.startup-checked && root.startup-rows.length == 0: Empty { icon: Assets.i-bolt; title: "No problems found"; text: "Every startup entry points to a real, clean program."; }
+                                for r[i] in root.startup-rows: Panel {
+                                    edge: r.tone == "alarm" ? Theme.alarm.with-alpha(0.55) : Theme.line;
+                                    HorizontalLayout {
+                                        padding: 14px;
+                                        spacing: 14px;
+                                        VerticalLayout { alignment: start; width: 104px; Chip { text: r.chip; tone: Theme.tone(r.tone); } }
+                                        VerticalLayout {
+                                            spacing: 3px;
+                                            horizontal-stretch: 1;
+                                            Text { text: r.name; font-family: Theme.body; font-size: 14px; font-weight: 600; color: Theme.fg; overflow: elide; }
+                                            Mono { text: r.location; color: Theme.fg-3; font-size: 11px; }
+                                            Mono { text: r.command; }
+                                            if r.detail != "": Body { text: r.detail; font-size: 12px; color: Theme.tone(r.tone); }
+                                        }
+                                        if r.fixable: VerticalLayout { alignment: start; Btn { text: "Switch off"; kind: "ghost"; small: true; clicked => { root.disable-startup(i); } } }
+                                    }
+                                }
+                                if root.disabled-rows.length > 0: Eyebrow { text: "SWITCHED OFF BY HEXWARD"; }
+                                for d in root.disabled-rows: Panel {
+                                    fill: Theme.bg;
+                                    HorizontalLayout {
+                                        padding: 14px;
+                                        spacing: 14px;
+                                        VerticalLayout { alignment: start; width: 104px; Chip { text: "OFF"; tone: Theme.fg-3; } }
+                                        VerticalLayout {
+                                            spacing: 3px;
+                                            horizontal-stretch: 1;
+                                            Text { text: d.name; font-family: Theme.body; font-size: 14px; font-weight: 600; color: Theme.fg-2; }
+                                            Mono { text: d.info; color: Theme.fg-3; }
+                                        }
+                                        VerticalLayout { alignment: start; Btn { text: "Turn back on"; kind: "ghost"; small: true; clicked => { root.restore-startup(d.id); } } }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // QUARANTINE
+                if root.page == "vault": Screen {
+                    VerticalLayout {
+                        padding: 34px;
+                        padding-top: 30px;
+                        spacing: 20px;
+                        Header { eyebrow: "QUARANTINE"; title: "Locked away"; text: "Files here are encrypted and can't run. Restore puts a file back exactly where it was."; }
+                        if root.vault-rows.length == 0: Empty { icon: Assets.i-vault; title: "Quarantine is empty"; text: "Nothing has been locked away. That's good."; }
+                        if root.vault-rows.length > 0: ScrollView {
+                            vertical-stretch: 1;
+                            VerticalLayout {
+                                padding: 4px;
+                                spacing: 12px;
+                                alignment: start;
+                                for v[i] in root.vault-rows: Panel {
+                                    HorizontalLayout {
+                                        padding: 14px;
+                                        spacing: 14px;
+                                        VerticalLayout { alignment: start; Image { source: Assets.i-vault; width: 24px; height: 24px; colorize: Theme.alarm; image-rendering: pixelated; } }
+                                        VerticalLayout {
+                                            spacing: 3px;
+                                            horizontal-stretch: 1;
+                                            Text { text: v.name; font-family: Theme.mono; font-size: 13px; font-weight: 600; color: Theme.fg; overflow: elide; }
+                                            Mono { text: v.path; }
+                                            Mono { text: v.info; color: Theme.fg-3; font-size: 11px; }
+                                        }
+                                        if !v.confirm: VerticalLayout {
+                                            alignment: start;
+                                            HorizontalLayout {
+                                                spacing: 10px;
+                                                Btn { text: "Restore"; kind: "ghost"; small: true; clicked => { root.vault-restore(v.id); } }
+                                                Btn { text: "Delete forever"; kind: "ghost"; small: true; has-icon: true; icon: Assets.i-trash; clicked => { root.vault-ask(i); } }
+                                            }
+                                        }
+                                        if v.confirm: VerticalLayout {
+                                            alignment: start;
+                                            HorizontalLayout {
+                                                spacing: 10px;
+                                                VerticalLayout { alignment: center; Body { text: "Delete forever? This can't be undone."; font-size: 12px; color: Theme.alarm; wrap: no-wrap; } }
+                                                Btn { text: "Delete"; kind: "danger"; small: true; clicked => { root.vault-delete(v.id); } }
+                                                Btn { text: "Cancel"; kind: "ghost"; small: true; clicked => { root.vault-cancel(i); } }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // HISTORY
+                if root.page == "history": Screen {
+                    VerticalLayout {
+                        padding: 34px;
+                        padding-top: 30px;
+                        spacing: 20px;
+                        Header { eyebrow: "HISTORY"; title: "A year of protection"; text: "Every scan and action, from the app or the command line. Stored only on this PC."; }
+                        Panel {
+                            VerticalLayout {
+                                padding: 18px;
+                                spacing: 14px;
+                                Heat { cells: root.heat-year; cell: 11px; gap: 3px; }
+                                Legend { }
+                            }
+                        }
+                        if root.events.length == 0: Body { text: "No activity yet. Run a scan to start the record."; }
+                        ScrollView {
+                            vertical-stretch: 1;
+                            VerticalLayout {
+                                alignment: start;
+                                for e in root.events: Rectangle {
+                                    height: 60px;
+                                    HorizontalLayout {
+                                        padding-left: 4px;
+                                        padding-right: 10px;
+                                        spacing: 16px;
+                                        VerticalLayout { alignment: center; width: 116px; Chip { text: e.chip; tone: Theme.tone(e.tone); } }
+                                        VerticalLayout {
+                                            alignment: center;
+                                            spacing: 3px;
+                                            horizontal-stretch: 1;
+                                            Text { text: e.title; font-family: Theme.body; font-size: 14px; font-weight: 600; color: Theme.fg; overflow: elide; }
+                                            Mono { text: e.detail; color: Theme.fg-3; }
+                                        }
+                                        VerticalLayout { alignment: center; Mono { text: e.when; color: Theme.fg-3; } }
+                                    }
+                                    Rectangle { x: 0; y: parent.height - 2px; width: parent.width; height: 2px; background: Theme.line; }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // SETTINGS
+                if root.page == "settings": Screen {
+                    ScrollView {
+                        VerticalLayout {
+                            padding: 34px;
+                            padding-top: 30px;
+                            spacing: 14px;
+                            alignment: start;
+                            Header { eyebrow: "SETTINGS"; title: "Settings"; text: ""; }
+                            Eyebrow { text: "APPEARANCE"; }
+                            Panel {
+                                VerticalLayout {
+                                    SettingRow { title: "Dark theme"; text: "Ink background, easy on the eyes. Turn off for the light Paper theme."; Switch { checked: Theme.dark; toggled(v) => { root.set-dark(v); } } }
+                                    SettingRow { title: "Keep running in the tray"; text: "Closing the window keeps Hexward in the notification area, so scans finish and alerts still reach you."; last: true; Switch { checked: root.close-to-tray; toggled(v) => { root.set-close-to-tray(v); } } }
+                                }
+                            }
+                            Eyebrow { text: "SCANNING"; }
+                            Panel {
+                                VerticalLayout {
+                                    SettingRow { title: "Skip files larger than"; text: "Bigger files take longer and rarely carry malware."; Seg { options: ["32 MB", "64 MB", "128 MB", "256 MB"]; value: root.max-size-mb + " MB"; picked(o) => { root.set-max-size(o); } } }
+                                    SettingRow { title: "Select suspicious files too"; text: "Off: only confirmed threats are pre-selected for quarantine. Suspicious files are listed so you decide."; last: true; Switch { checked: root.quarantine-suspicious; toggled(v) => { root.set-quarantine-suspicious(v); } } }
+                                }
+                            }
+                            Eyebrow { text: "TRUSTED FILES"; }
+                            Panel {
+                                VerticalLayout {
+                                    if root.allow-rows.length == 0: SettingRow { title: "No trusted files"; text: "Files you Allow from scan results are listed here, and Hexward never flags them again."; last: true; }
+                                    for a[i] in root.allow-rows: SettingRow {
+                                        title: a.name;
+                                        text: a.path;
+                                        last: i == root.allow-rows.length - 1;
+                                        Btn { text: "Stop trusting"; kind: "ghost"; small: true; clicked => { root.allow-remove(a.sha); } }
+                                    }
+                                }
+                            }
+                            Eyebrow { text: "RULES"; }
+                            Panel {
+                                VerticalLayout {
+                                    SettingRow { title: "YARA Forge rule pack"; text: "Core: about 5,100 tested rules. Extended: more coverage, a little more noise."; Seg { options: ["core", "extended"]; value: root.pack; picked(o) => { root.set-pack(o); } } }
+                                    SettingRow { title: "Update rules"; text: root.rules-info; Btn { text: root.updating ? "Updating…" : "Update now"; enabled: !root.updating; small: true; has-icon: true; icon: Assets.i-update; clicked => { root.update-rules(); } } }
+                                    SettingRow { title: "MalwareBazaar hash list"; text: root.bazaar-info; last: true; }
+                                }
+                            }
+                            Eyebrow { text: "DATA"; }
+                            Panel {
+                                VerticalLayout {
+                                    SettingRow { title: "Data folder"; text: root.data-dir; last: true; Btn { text: "Open"; kind: "ghost"; small: true; has-icon: true; icon: Assets.i-folder; clicked => { root.open-data-dir(); } } }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // ABOUT
+                if root.page == "about": Screen {
+                    VerticalLayout {
+                        padding: 34px;
+                        padding-top: 30px;
+                        spacing: 22px;
+                        alignment: start;
+                        HorizontalLayout {
+                            spacing: 24px;
+                            alignment: start;
+                            PixelMark { size: 96px; build: root.boot; frame: root.frame; }
+                            VerticalLayout {
+                                alignment: center;
+                                spacing: 12px;
+                                Image { source: Assets.wordmark; height: 35px; width: 205px; colorize: Theme.fg; image-rendering: pixelated; }
+                                Mono { text: "Version " + root.version + " · " + root.engine-status; color: Theme.fg-3; }
+                            }
+                        }
+                        Text { text: "Every byte, warded."; font-family: Theme.pixel; font-size: 24px; color: Theme.accent; }
+                        Body { text: "Hexward is a free, open-source malware scanner for Windows, written fully in Rust. No account, no ads, no paid tier."; }
+                        Panel {
+                            edge: root.app-update-available ? Theme.accent : Theme.line;
+                            HorizontalLayout {
+                                padding: 16px;
+                                spacing: 14px;
+                                VerticalLayout {
+                                    alignment: center;
+                                    horizontal-stretch: 1;
+                                    spacing: 3px;
+                                    Text { text: root.app-update-available ? "Version " + root.app-update-version + " is available" : "App updates"; font-family: Theme.body; font-size: 14px; font-weight: 600; color: Theme.fg; }
+                                    Mono { text: root.app-update-status; color: Theme.fg-3; }
+                                }
+                                if root.app-update-busy: VerticalLayout { alignment: center; PixelSpinner { frame: root.frame; } }
+                                if root.app-update-available: Btn { text: "Update and restart"; enabled: !root.app-update-busy; small: true; clicked => { root.install-app-update(); } }
+                                if !root.app-update-available: Btn { text: "Check for updates"; kind: "ghost"; small: true; enabled: !root.app-update-busy; clicked => { root.check-app-update(); } }
+                            }
+                        }
+                        HorizontalLayout {
+                            spacing: 14px;
+                            Stat { label: "LICENSE"; value: "GPL-3.0"; big: false; }
+                            Stat { label: "RULES LOADED"; value: root.rules-count; big: false; }
+                            Stat { label: "LAB TESTS"; value: "Not tested yet"; big: false; }
+                            Stat { label: "REAL-TIME SHIELDS"; value: "Phase 4"; big: false; }
+                        }
+                        Body { text: "Detection uses community YARA rules from YARA Forge (each keeps its author's license) and, with an Auth-Key, abuse.ch MalwareBazaar hashes (CC0). Fonts: Pixelify Sans, Geist, Geist Mono (SIL Open Font License). Updates are signed and verified before they install."; font-size: 12px; color: Theme.fg-3; }
+                        HorizontalLayout {
+                            spacing: 14px;
+                            alignment: start;
+                            Btn { text: root.updating ? "Updating…" : "Update rules"; enabled: !root.updating; has-icon: true; icon: Assets.i-update; clicked => { root.update-rules(); } }
+                            Btn { text: "Open data folder"; kind: "ghost"; has-icon: true; icon: Assets.i-folder; clicked => { root.open-data-dir(); } }
+                        }
+                    }
+                }
+
+                // Threat flash: red pixel frame around the content.
+                if root.flash: Rectangle {
+                    for i in 4: Rectangle {
+                        x: i == 1 ? parent.width - 4px : 0px;
+                        y: i == 3 ? parent.height - 4px : 0px;
+                        width: i < 2 ? 4px : parent.width;
+                        height: i < 2 ? parent.height : 4px;
+                        background: Theme.alarm;
+                        opacity: Math.mod(root.frame, 6) < 3 ? 0.9 : 0.25;
+                    }
+                }
+            }
+        }
+    }
+
+    // Window edge (no system frame).
+    Rectangle {
+        border-width: 1px;
+        border-color: Theme.line-strong;
+        width: root.width;
+        height: root.height;
+    }
+
+    // Resize handles.
+    if !root.is-max: ResizeEdge { x: 0; y: 6px; width: 5px; height: root.height - 12px; mouse-cursor: ew-resize; dir: "w"; resize(d) => { root.resize-window(d); } }
+    if !root.is-max: ResizeEdge { x: root.width - 5px; y: 6px; width: 5px; height: root.height - 12px; mouse-cursor: ew-resize; dir: "e"; resize(d) => { root.resize-window(d); } }
+    if !root.is-max: ResizeEdge { x: 6px; y: root.height - 5px; width: root.width - 12px; height: 5px; mouse-cursor: ns-resize; dir: "s"; resize(d) => { root.resize-window(d); } }
+    if !root.is-max: ResizeEdge { x: 6px; y: 0; width: root.width - 12px; height: 4px; mouse-cursor: ns-resize; dir: "n"; resize(d) => { root.resize-window(d); } }
+    if !root.is-max: ResizeEdge { x: root.width - 10px; y: root.height - 10px; width: 10px; height: 10px; mouse-cursor: nwse-resize; dir: "se"; resize(d) => { root.resize-window(d); } }
+    if !root.is-max: ResizeEdge { x: 0; y: root.height - 10px; width: 10px; height: 10px; mouse-cursor: nesw-resize; dir: "sw"; resize(d) => { root.resize-window(d); } }
+
+    // Toast
+    if root.toast-visible: Panel {
+        property <bool> shown: false;
+        raised: true;
+        edge: Theme.tone(root.toast-state).with-alpha(0.7);
+        width: 392px;
+        height: 88px;
+        x: root.width - self.width - 30px;
+        y: root.height - self.height - 30px + (self.shown ? 0px : 24px);
+        opacity: self.shown ? 1 : 0;
+        animate y { duration: 220ms; easing: ease-out; }
+        animate opacity { duration: 160ms; }
+        init => {
+            self.shown = true;
+        }
+        HorizontalLayout {
+            padding: 16px;
+            spacing: 14px;
+            VerticalLayout { alignment: start; PixelMark { size: 32px; state: root.toast-state; } }
+            VerticalLayout {
+                spacing: 3px;
+                alignment: start;
+                Text { text: root.toast-title; font-family: Theme.body; font-size: 14px; font-weight: 600; color: Theme.fg; }
+                Body { text: root.toast-text; font-size: 12px; }
+            }
+        }
+    }
+}

@@ -1,0 +1,9 @@
+# Rules Hexward never reports, one rule identifier per line.
+# Each entry needs a reason: the clean file it matched and when it was found.
+# Users can add their own list as disabled.txt in %LOCALAPPDATA%\Hexward\rules.
+
+# 2026-11-08: matched 9 signed Adobe After Effects 2026 DLLs (mochaAE\Resources\mochaui\bin\*.dll)
+ARKBIRD_SOLG_MAL_Bazarloader_Oct_2021_1
+
+# 2026-11-08: matched Microsoft's signed debug C runtime (Windows SDK 10.0.26100, ucrtbased.dll)
+MALPEDIA_Win_Yokai_Auto

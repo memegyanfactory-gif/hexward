@@ -1,0 +1,89 @@
+# Every push to main: test. If the version in Cargo.toml has no release yet:
+# build, sign with the release key, and publish a GitHub Release. Installed apps see it
+# within 6 hours (or at once with "Check for updates") and install it after verifying the signature.
+#
+# To ship an update: bump [workspace.package] version in Cargo.toml, add a CHANGELOG.md section, push.
+
+name: Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      # Pinned to a commit, never a movable tag (see the tj-actions/changed-files compromise).
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Read version
+        id: v
+        shell: bash
+        run: |
+          v=$(grep -m1 -E '^version = ' Cargo.toml | cut -d'"' -f2)
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          if git ls-remote --exit-code --tags "https://github.com/${GITHUB_REPOSITORY}.git" "refs/tags/v$v" >/dev/null; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "v$v is already released; nothing to publish."
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Rust toolchain
+        shell: bash
+        run: rustup toolchain install stable --profile minimal --component clippy && rustup default stable
+
+      - name: Test
+        run: cargo test --workspace --locked
+
+      - name: Lint
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+      - name: Build
+        if: steps.v.outputs.exists == 'false'
+        run: cargo build --release --locked -p hexward-app -p hexward -p hexward-release
+
+      - name: Sign
+        if: steps.v.outputs.exists == 'false'
+        shell: bash
+        env:
+          HEXWARD_SIGNING_KEY: ${{ secrets.HEXWARD_SIGNING_KEY }}
+        run: |
+          if [ -z "$HEXWARD_SIGNING_KEY" ]; then echo "::error::HEXWARD_SIGNING_KEY secret is missing; refusing to publish an unsigned release"; exit 1; fi
+          v="${{ steps.v.outputs.version }}"
+          mkdir dist
+          cp target/release/hexward-app.exe target/release/hexward.exe dist/
+          ./target/release/hexward-release.exe sign dist/hexward-app.exe --version "$v"
+          ./target/release/hexward-release.exe sign dist/hexward.exe --version "$v"
+          (cd dist && sha256sum hexward-app.exe hexward.exe > SHA256SUMS.txt)
+
+      - name: Release notes
+        if: steps.v.outputs.exists == 'false'
+        shell: bash
+        run: |
+          v="${{ steps.v.outputs.version }}"
+          awk -v v="$v" '$0 ~ "^## \\[?"v"\\]?" {on=1; next} /^## / && on {exit} on' CHANGELOG.md > notes.md || true
+          if [ ! -s notes.md ]; then echo "Hexward $v" > notes.md; fi
+          printf '\n---\nSigned with the Hexward release key. The app verifies the signature before installing.\n' >> notes.md
+
+      - name: Publish
+        if: steps.v.outputs.exists == 'false'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          v="${{ steps.v.outputs.version }}"
+          gh release create "v$v" dist/hexward-app.exe dist/hexward-app.exe.sig dist/hexward.exe dist/hexward.exe.sig dist/SHA256SUMS.txt \
+            --title "Hexward $v" --notes-file notes.md --target "$GITHUB_SHA"

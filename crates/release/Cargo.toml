@@ -1,0 +1,10 @@
+[package]
+name = "hexward-release"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+anyhow = "1.0.104"
+hexward-update = { version = "0.1.0", path = "../update" }

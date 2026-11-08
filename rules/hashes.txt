@@ -1,0 +1,7 @@
+# Hexward hash list
+# One SHA-256 per line, optionally followed by a comma and a detection name.
+# Lines starting with # are ignored. CSV exports (for example from MalwareBazaar)
+# also load: the first 64-character hex field on each line is used.
+#
+# Harmless test entry: SHA-256 of the 26 bytes "HEXWARD-HARMLESS-HASH-TEST"
+940a2e4e44de86cf81f860ffc06fcac2b1767114f25ad3551be2e4fed8ba24dd,Test/Any.HashMarker!a
