@@ -12,6 +12,7 @@
 pub mod app;
 pub mod channel;
 pub mod cloud;
+pub mod counts;
 pub mod online;
 
 use std::collections::BTreeMap;

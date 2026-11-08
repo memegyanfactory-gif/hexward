@@ -14,7 +14,8 @@ export struct VaultRow { id: string, name: string, path: string, info: string, c
 export struct StartupRow { location: string, name: string, command: string, chip: string, tone: string, fixable: bool, detail: string, publisher: string, signed: bool, size: string, icon: image, has-icon: bool }
 export struct DisabledRow { id: string, name: string, info: string }
 export struct EventRow { when: string, title: string, detail: string, chip: string, tone: string }
-export struct StatItem { label: string, value: string }
+export struct StatItem { label: string, value: string, sub: string, tone: string }
+export struct ToastItem { id: int, state: string, title: string, text: string, action: string, target: string, life: float }
 export struct StatusRow { name: string, value: string, tone: string }
 export struct DriveRow { root: string, label: string, info: string, selected: bool, usage: float }
 export struct AllowRow { sha: string, name: string, path: string }
@@ -43,6 +44,8 @@ export global Theme {
     out property <color> amber: dark ? #FFB547 : #A86A00;
     out property <color> signal: dark ? #5AA9FF : #1C64C8;
     out property <color> shadow: dark ? #020406 : #B9C6BD;
+    out property <color> dot: dark ? #1A2330 : #D9E2DB;
+    out property <color> glint: dark ? #FFFFFF0D : #FFFFFFB0;
     out property <color> mark-hi: dark ? #4BE07A : #2FB463;
     out property <color> mark-lo: dark ? #23A05A : #1A7F45;
     out property <color> heat-0: dark ? #161E28 : #E2E9E4;
@@ -80,6 +83,8 @@ export global Assets {
     in property <image> i-sparkle;
     in property <image> i-lock;
     in property <image> i-terminal;
+    // 16 × 16 tile with one 2 × 2 dot: the grid the shields keep watch on.
+    in property <image> dot-tile;
 }
 
 // ---------- type ----------
@@ -93,7 +98,7 @@ component Eyebrow inherits Text {
 
 component Title inherits Text {
     font-family: Theme.pixel;
-    font-size: 32px;
+    font-size: 28px;
     font-weight: 600;
     color: Theme.fg;
 }
@@ -123,27 +128,28 @@ component Edges inherits Rectangle {
     Rectangle { x: root.width; y: 0; width: root.t; height: root.height; background: root.edge; }
 }
 
-// The brand's panel: 2 px border, empty corner pixels, optional hard shadow.
+// A block with the brand's stepped corners: two 2 px steps.
+component Stepped inherits Rectangle {
+    in property <color> c;
+    Rectangle { x: 4px; y: 0; width: root.width - 8px; height: root.height; background: root.c; }
+    Rectangle { x: 2px; y: 2px; width: root.width - 4px; height: root.height - 4px; background: root.c; }
+    Rectangle { x: 0; y: 4px; width: root.width; height: root.height - 8px; background: root.c; }
+}
+
+// The brand's panel: stepped corners, a 2 px edge, a faint glint along the top, and a hard shadow
+// when raised. lit = hovered and clickable: the shadow grows from 0 to 6 px, so the card rises.
 component Panel inherits Rectangle {
     in property <color> fill: Theme.surface;
     in property <color> edge: Theme.line;
     in property <bool> raised: false;
-    if root.raised: Rectangle {
-        x: 6px;
-        y: 6px;
-        width: root.width;
-        height: root.height;
-        background: Theme.shadow;
-    }
-    Rectangle {
-        x: 0;
-        y: 0;
-        width: root.width;
-        height: root.height;
-        background: root.fill;
-        animate background { duration: 160ms; }
-    }
-    Edges { x: 0; y: 0; width: root.width; height: root.height; edge: root.edge; }
+    in property <bool> lit: false;
+    property <length> sh: root.lit ? 6px : root.raised ? 4px : 0px;
+    animate sh { duration: 160ms; easing: cubic-bezier(0.2, 0.8, 0.2, 1); }
+    if root.sh > 0.5px: Stepped { x: root.sh; y: root.sh; width: root.width; height: root.height; c: Theme.shadow; }
+    Stepped { x: 0; y: 0; width: root.width; height: root.height; c: root.edge; }
+    Rectangle { x: 4px; y: 2px; width: root.width - 8px; height: root.height - 4px; background: root.fill; animate background { duration: 160ms; } }
+    Rectangle { x: 2px; y: 4px; width: root.width - 4px; height: root.height - 8px; background: root.fill; animate background { duration: 160ms; } }
+    Rectangle { x: 4px; y: 2px; width: root.width - 8px; height: 2px; background: Theme.glint; }
     @children
 }
 
@@ -188,25 +194,30 @@ component Btn inherits Rectangle {
     in property <bool> has-icon: false;
     in property <bool> small: false;
     callback clicked;
-    property <color> fill: !root.enabled ? Theme.raised : root.kind == "primary" ? (ta.has-hover ? Theme.accent.brighter(0.08) : Theme.accent) : root.kind == "danger" ? Theme.alarm : ta.has-hover ? Theme.raised : transparent;
+    property <bool> down: ta.pressed && root.enabled;
+    property <bool> solid: root.kind != "quiet";
+    property <color> fill: !root.enabled ? Theme.raised : root.kind == "primary" ? (ta.has-hover ? Theme.accent.brighter(0.08) : Theme.accent) : root.kind == "danger" ? (ta.has-hover ? Theme.alarm.brighter(0.08) : Theme.alarm) : root.kind == "ghost" ? (ta.has-hover ? Theme.raised : Theme.surface) : ta.has-hover ? Theme.raised : transparent;
     property <color> edge: !root.enabled ? Theme.raised : root.kind == "ghost" ? (ta.has-hover ? Theme.fg-3 : Theme.line-strong) : root.kind == "quiet" ? transparent : root.fill;
     property <color> ink: !root.enabled ? Theme.fg-3 : root.kind == "primary" ? Theme.on-accent : root.kind == "danger" ? Theme.bg : Theme.fg;
     property <length> pad: root.small ? 10px : 16px;
+    property <length> drop: root.small ? 3px : 4px;
     min-width: label.preferred-width + 2 * root.pad + (root.has-icon ? 24px : 0px);
-    min-height: root.small ? 30px : 40px;
+    min-height: root.small ? 30px : 38px;
     horizontal-stretch: 0;
     vertical-stretch: 0;
+    // The hard shadow the face sinks into.
+    if root.solid && root.enabled && !root.down: Rectangle { x: root.drop; y: root.drop; width: root.width; height: root.height; background: Theme.shadow; }
     Rectangle {
-        x: 0;
-        y: ta.pressed && root.enabled ? 2px : 0px;
+        x: root.down ? root.drop : 0px;
+        y: root.down ? root.drop : 0px;
         width: root.width;
         height: root.height;
         background: root.fill;
-        animate background { duration: 90ms; }
+        animate background { duration: 80ms; }
         Edges { x: 0; y: 0; width: parent.width; height: parent.height; edge: root.edge; }
-        if (root.kind == "primary" || root.kind == "danger") && root.enabled && !ta.pressed: Rectangle {
+        if (root.kind == "primary" || root.kind == "danger") && root.enabled: Rectangle {
             x: 0;
-            y: parent.height - 3px;
+            y: root.down ? 0px : parent.height - 3px;
             width: parent.width;
             height: 3px;
             background: #00000038;
@@ -224,7 +235,7 @@ component Btn inherits Rectangle {
                 text: root.text;
                 color: root.ink;
                 font-family: Theme.body;
-                font-size: root.small ? 12px : 14px;
+                font-size: root.small ? 12px : 13.5px;
                 font-weight: 600;
                 vertical-alignment: center;
             }
@@ -338,18 +349,193 @@ component Stat inherits Panel {
     in property <string> value;
     in property <color> tone: Theme.fg;
     in property <bool> big: true;
+    in property <string> sub;
+    in property <color> led: transparent;
     VerticalLayout {
-        padding: 14px;
-        spacing: 6px;
-        Eyebrow { text: root.label; }
+        padding: 12px;
+        padding-left: 14px;
+        spacing: 3px;
+        HorizontalLayout {
+            spacing: 6px;
+            if root.led != transparent: VerticalLayout { alignment: center; Rectangle { width: 6px; height: 6px; background: root.led; } }
+            Eyebrow { text: root.label; font-size: 10px; overflow: elide; }
+        }
         Text {
             text: root.value;
             font-family: root.big ? Theme.pixel : Theme.mono;
-            font-size: root.big ? 26px : 14px;
+            font-size: root.big ? 22px : 14px;
             font-weight: 600;
             color: root.tone;
             overflow: elide;
             animate color { duration: 200ms; }
+        }
+        if root.sub != "": Mono { text: root.sub; font-size: 10.5px; color: Theme.fg-3; }
+    }
+}
+
+// A panel's own heading: small, bold, with room for a note on the right.
+component PanelHead inherits HorizontalLayout {
+    in property <string> title;
+    in property <string> note;
+    spacing: 8px;
+    Text { text: root.title; font-family: Theme.body; font-size: 13px; font-weight: 600; color: Theme.fg; vertical-alignment: center; }
+    Rectangle { horizontal-stretch: 1; }
+    Mono { text: root.note; color: Theme.fg-3; font-size: 11px; vertical-alignment: center; }
+}
+
+// Live throughput: one pixel bar per sample, newest on the right and brightest.
+component Spark inherits Rectangle {
+    in property <[float]> values;
+    in property <color> tone: Theme.signal;
+    property <length> bw: root.width / 60;
+    for v[i] in root.values: Rectangle {
+        x: root.width - (root.values.length - i) * root.bw;
+        y: root.height - self.height;
+        width: Math.max(1px, root.bw - 2px);
+        height: Math.max(2px, Math.round(v * root.height / 2px) * 2px);
+        background: i == root.values.length - 1 ? root.tone : root.tone.with-alpha(0.25 + 0.4 * i / Math.max(1, root.values.length));
+    }
+    Rectangle { x: 0; y: root.height - 1px; width: root.width; height: 1px; background: Theme.line; }
+}
+
+// The scan HUD: a small shield sending out square pixel rings while it reads.
+component Radar inherits Rectangle {
+    in property <int> frame;
+    in property <bool> active;
+    in property <string> state: "scan";
+    property <length> cx: self.width / 2;
+    property <length> cy: self.height / 2;
+    clip: true;
+    for k in 3: Rectangle {
+        property <float> t: Math.mod(root.frame + k * 16, 48) / 48;
+        property <length> side: Math.round((64px + self.t * (root.height - 64px)) / 4px) * 4px;
+        x: Math.round((root.cx - self.side / 2) / 2px) * 2px;
+        y: Math.round((root.cy - self.side / 2) / 2px) * 2px;
+        width: self.side;
+        height: self.side;
+        visible: root.active;
+        opacity: (1 - self.t) * 0.8;
+        border-width: 2px;
+        border-color: Theme.tone(root.state);
+    }
+    // corner brackets: the HUD frame
+    for c in 4: Rectangle {
+        x: Math.mod(c, 2) == 0 ? 0px : root.width - 12px;
+        y: c < 2 ? 0px : root.height - 12px;
+        width: 12px;
+        height: 12px;
+        Rectangle { x: Math.mod(c, 2) == 0 ? 0px : 10px; y: 0; width: 2px; height: 12px; background: Theme.line-strong; }
+        Rectangle { x: 0; y: c < 2 ? 0px : 10px; width: 12px; height: 2px; background: Theme.line-strong; }
+    }
+    PixelMark {
+        x: root.cx - 28px;
+        y: root.cy - 28px;
+        size: 56px;
+        state: root.state;
+        blink: root.active;
+        scan-row: root.active ? Math.mod(Math.floor(root.frame / 2), 20) - 2 : -1;
+        frame: root.frame;
+    }
+}
+
+// A dashboard shortcut: icon and label, rises on hover.
+component Shortcut inherits Panel {
+    in property <image> icon;
+    in property <string> text;
+    in property <string> hint;
+    callback clicked;
+    lit: ta.has-hover;
+    edge: ta.has-hover ? Theme.accent : Theme.line;
+    fill: ta.has-hover ? Theme.raised : Theme.surface;
+    height: 44px;
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 12px;
+        spacing: 10px;
+        VerticalLayout { alignment: center; Image { source: root.icon; width: 18px; height: 18px; colorize: ta.has-hover ? Theme.accent : Theme.fg-2; image-rendering: pixelated; } }
+        Text { text: root.text; font-family: Theme.body; font-size: 12.5px; font-weight: 600; color: Theme.fg; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
+        Mono { text: root.hint; font-size: 10px; color: Theme.fg-3; vertical-alignment: center; }
+    }
+    ta := TouchArea { mouse-cursor: pointer; clicked => { root.clicked(); } }
+}
+
+// One toast: as tall as its text, springs in from the right, a threat shakes once, the countdown
+// blocks drain (paused while hovered).
+component ToastCard inherits Rectangle {
+    in property <ToastItem> item;
+    in property <int> frame;
+    callback dismiss;
+    callback act;
+    callback hover(bool);
+    property <bool> shown: false;
+    property <int> born: 0;
+    property <int> age: root.frame - root.born;
+    property <color> tone: Theme.tone(root.item.state);
+    property <length> shake: root.item.state == "alarm" && root.age >= 7 && root.age < 19 ? (Math.mod(root.age, 4) < 2 ? -4px : 4px) : 0px;
+    property <length> off: (root.shown ? 0px : 64px) + root.shake;
+    animate off { duration: 260ms; easing: cubic-bezier(0.3, 1.4, 0.5, 1); }
+    height: body.preferred-height;
+    init => {
+        self.born = root.frame;
+        self.shown = true;
+    }
+    ta := TouchArea {
+        changed has-hover => {
+            root.hover(self.has-hover);
+        }
+    }
+    Panel {
+        x: root.off;
+        y: 0;
+        width: root.width;
+        height: root.height;
+        opacity: root.shown ? 1 : 0;
+        animate opacity { duration: 160ms; }
+        raised: true;
+        edge: root.tone.with-alpha(0.75);
+        Rectangle { x: 4px; y: 6px; width: 4px; height: parent.height - 12px; background: root.tone; }
+        if root.item.life >= 0: Rectangle {
+            x: 14px;
+            y: parent.height - 9px;
+            width: parent.width - 28px;
+            height: 3px;
+            for i in 12: Rectangle {
+                x: i * (parent.width / 12);
+                width: parent.width / 12 - 2px;
+                height: 3px;
+                background: root.tone;
+                opacity: i < Math.ceil(root.item.life * 12) ? 0.85 : 0.15;
+            }
+        }
+    }
+    body := HorizontalLayout {
+        x: root.off;
+        padding: 14px;
+        padding-left: 20px;
+        padding-bottom: root.item.life >= 0 ? 18px : 14px;
+        spacing: 12px;
+        VerticalLayout { alignment: start; PixelMark { size: 28px; state: root.item.state; } }
+        VerticalLayout {
+            spacing: 3px;
+            alignment: start;
+            horizontal-stretch: 1;
+            Text { text: root.item.title; font-family: Theme.body; font-size: 13.5px; font-weight: 600; color: Theme.fg; wrap: word-wrap; }
+            Body { text: root.item.text; font-size: 12px; }
+            if root.item.action != "": HorizontalLayout {
+                padding-top: 8px;
+                alignment: start;
+                Btn { text: root.item.action; small: true; kind: root.item.state == "alarm" ? "danger" : "primary"; clicked => { root.act(); } }
+            }
+        }
+        VerticalLayout {
+            alignment: start;
+            Rectangle {
+                width: 20px;
+                height: 20px;
+                background: x-ta.has-hover ? Theme.raised : transparent;
+                Path { x: 5px; y: 5px; width: 10px; height: 10px; viewbox-width: 10; viewbox-height: 10; commands: "M 0 0 L 10 10 M 10 0 L 0 10"; stroke: Theme.fg-3; stroke-width: 2px; }
+                x-ta := TouchArea { mouse-cursor: pointer; clicked => { root.dismiss(); } }
+            }
         }
     }
 }
@@ -796,6 +982,7 @@ export component AppWindow inherits Window {
     in property <bool> cloud-reputation: false;
     in property <bool> cloud-reports: false;
     in property <bool> cloud-samples: false;
+    in property <bool> cloud-counts: false;
     in property <bool> document-backup: true;
     in property <bool> script-shield-busy;
     in property <bool> file-shield: true;
@@ -818,10 +1005,15 @@ export component AppWindow inherits Window {
     in property <string> app-update-status;
 
     // Toast
-    in property <bool> toast-visible;
-    in property <string> toast-title;
-    in property <string> toast-text;
-    in property <string> toast-state: "safe";
+    in property <[ToastItem]> toasts;
+    // True for a moment after a threat toast arrives, so the frame clock runs its shake.
+    in property <bool> toast-fresh;
+    callback toast-dismiss(int);
+    callback toast-act(int);
+    callback toast-hover(int, bool);
+    in property <[EventRow]> home-events;
+    in property <string> shields-on: "…";
+    in property <[float]> scan-speed-history;
 
     callback navigate(string);
     callback start-scan(string);
@@ -877,6 +1069,7 @@ export component AppWindow inherits Window {
     callback set-cloud-reputation(bool);
     callback set-cloud-reports(bool);
     callback set-cloud-samples(bool);
+    callback set-cloud-counts(bool);
     callback send-sample(int);
     callback set-document-backup(bool);
     callback restore-files();
@@ -895,7 +1088,7 @@ export component AppWindow inherits Window {
     callback toggle-maximize();
     callback close-window();
 
-    property <bool> moving: root.scanning || root.boot < 1 || root.flash || root.startup-busy || root.updating || root.app-update-busy || root.home-state == "alarm" || root.tasks-scanning || root.tasks-memory-busy || (root.page == "tasks" && root.tasks-loading) || root.cleaner-busy || root.audit-busy || root.ext-busy;
+    property <bool> moving: root.toast-fresh || root.scanning || root.boot < 1 || root.flash || root.startup-busy || root.updating || root.app-update-busy || root.home-state == "alarm" || root.tasks-scanning || root.tasks-memory-busy || (root.page == "tasks" && root.tasks-loading) || root.cleaner-busy || root.audit-busy || root.ext-busy;
     Timer {
         interval: 33ms;
         running: root.moving;
@@ -1048,100 +1241,176 @@ export component AppWindow inherits Window {
             Rectangle {
                 horizontal-stretch: 1;
                 clip: true;
+                Image {
+                    x: 0;
+                    y: 0;
+                    width: parent.width;
+                    height: parent.height;
+                    source: Assets.dot-tile;
+                    horizontal-tiling: repeat;
+                    vertical-tiling: repeat;
+                    colorize: Theme.dot;
+                }
 
-                // HOME
+                // HOME: status strip, six numbers, every shield, threat map, activity, shortcuts.
                 if root.page == "home": Screen {
-                    VerticalLayout {
-                        padding: 34px;
-                        padding-top: 30px;
-                        spacing: 22px;
-                        alignment: start;
-                        if root.app-update-available: Panel {
-                            edge: Theme.accent;
-                            HorizontalLayout {
-                                padding: 14px;
-                                padding-left: 18px;
-                                spacing: 14px;
-                                VerticalLayout { alignment: center; Chip { text: "UPDATE"; tone: Theme.accent; } }
-                                VerticalLayout {
-                                    alignment: center;
-                                    horizontal-stretch: 1;
-                                    Text { text: "Hexward " + root.app-update-version + " is ready"; font-family: Theme.body; font-size: 14px; font-weight: 600; color: Theme.fg; }
-                                    Mono { text: root.app-update-notes; color: Theme.fg-3; }
-                                }
-                                Btn { text: root.app-update-busy ? "Updating…" : "Update and restart"; enabled: !root.app-update-busy; small: true; clicked => { root.install-app-update(); } }
-                            }
-                        }
-                        Panel {
-                            raised: true;
-                            HorizontalLayout {
-                                padding: 28px;
-                                spacing: 30px;
-                                VerticalLayout {
-                                    alignment: center;
-                                    PixelMark {
-                                        size: 128px;
-                                        build: root.boot;
-                                        state: root.home-state;
-                                        blink: root.home-state == "alarm" || (root.home-state == "safe" && !root.moving);
-                                        frame: root.home-state == "alarm" ? root.frame : root.beat;
+                    ScrollView {
+                        VerticalLayout {
+                            padding: 24px;
+                            padding-top: 20px;
+                            spacing: 14px;
+                            alignment: start;
+                            if root.app-update-available: Panel {
+                                edge: Theme.accent;
+                                HorizontalLayout {
+                                    padding: 10px;
+                                    padding-left: 16px;
+                                    spacing: 12px;
+                                    VerticalLayout { alignment: center; Chip { text: "UPDATE"; tone: Theme.accent; } }
+                                    VerticalLayout {
+                                        alignment: center;
+                                        horizontal-stretch: 1;
+                                        Text { text: "Hexward " + root.app-update-version + " is ready"; font-family: Theme.body; font-size: 13px; font-weight: 600; color: Theme.fg; }
+                                        Mono { text: root.app-update-notes; color: Theme.fg-3; font-size: 11px; }
                                     }
-                                }
-                                VerticalLayout {
-                                    alignment: center;
-                                    spacing: 10px;
-                                    HorizontalLayout {
-                                        alignment: start;
-                                        Chip { text: root.home-chip; tone: Theme.tone(root.home-state); }
-                                    }
-                                    Text { text: root.home-title; font-family: Theme.pixel; font-size: 36px; font-weight: 600; color: Theme.fg; }
-                                    Body { text: root.home-text; }
-                                    HorizontalLayout {
-                                        padding-top: 8px;
-                                        spacing: 14px;
-                                        alignment: start;
-                                        Btn { text: "Quick scan"; has-icon: true; icon: Assets.i-scan; enabled: root.engine-ready && !root.scanning; clicked => { root.go("scan"); root.start-scan("quick"); } }
-                                        Btn { text: "More scans"; kind: "ghost"; clicked => { root.go("scan"); } }
-                                        if root.needs-rules: Btn { text: root.updating ? "Downloading…" : "Download rules"; kind: "ghost"; enabled: !root.updating; has-icon: true; icon: Assets.i-update; clicked => { root.update-rules(); } }
-                                    }
+                                    Btn { text: root.app-update-busy ? "Updating…" : "Update and restart"; enabled: !root.app-update-busy; small: true; clicked => { root.install-app-update(); } }
                                 }
                             }
-                        }
-                        HorizontalLayout {
-                            spacing: 16px;
-                            for s in root.home-stats: Stat { label: s.label; value: s.value; }
-                        }
-                        HorizontalLayout {
-                            spacing: 16px;
+                            // status strip
                             Panel {
-                                horizontal-stretch: 3;
-                                VerticalLayout {
-                                    padding: 18px;
-                                    spacing: 14px;
-                                    HorizontalLayout {
-                                        Text { text: "Threat map"; font-family: Theme.body; font-size: 14px; font-weight: 600; color: Theme.fg; }
-                                        Rectangle { horizontal-stretch: 1; }
-                                        Mono { text: "26 weeks · a square per day"; color: Theme.fg-3; }
-                                    }
-                                    Heat { cells: root.heat-short; }
-                                    Legend { }
-                                }
-                            }
-                            Panel {
-                                horizontal-stretch: 2;
-                                VerticalLayout {
-                                    padding: 18px;
-                                    spacing: 10px;
-                                    Text { text: "Protection"; font-family: Theme.body; font-size: 14px; font-weight: 600; color: Theme.fg; }
-                                    for r in root.status-rows: HorizontalLayout {
-                                        spacing: 10px;
-                                        VerticalLayout {
-                                            alignment: center;
-                                            Rectangle { width: 8px; height: 8px; background: Theme.tone(r.tone); }
+                                raised: true;
+                                edge: root.home-state == "alarm" ? Theme.alarm : root.home-state == "warn" ? Theme.amber.with-alpha(0.7) : Theme.line-strong;
+                                HorizontalLayout {
+                                    padding: 16px;
+                                    padding-left: 20px;
+                                    padding-right: 20px;
+                                    spacing: 20px;
+                                    VerticalLayout {
+                                        alignment: center;
+                                        PixelMark {
+                                            size: 64px;
+                                            build: root.boot;
+                                            state: root.home-state;
+                                            blink: root.home-state == "alarm" || (root.home-state == "safe" && !root.moving);
+                                            frame: root.home-state == "alarm" ? root.frame : root.beat;
                                         }
-                                        Text { text: r.name; font-family: Theme.body; font-size: 13px; color: Theme.fg; vertical-alignment: center; }
-                                        Rectangle { horizontal-stretch: 1; }
-                                        Mono { text: r.value; color: Theme.fg-3; vertical-alignment: center; }
+                                    }
+                                    VerticalLayout {
+                                        alignment: center;
+                                        spacing: 5px;
+                                        horizontal-stretch: 1;
+                                        HorizontalLayout {
+                                            spacing: 10px;
+                                            alignment: start;
+                                            Chip { text: root.home-chip; tone: Theme.tone(root.home-state); }
+                                            Mono { text: "v" + root.version + " · " + root.shields-on + " shields on"; color: Theme.fg-3; font-size: 11px; vertical-alignment: center; }
+                                        }
+                                        Text { text: root.home-title; font-family: Theme.pixel; font-size: 26px; font-weight: 600; color: Theme.fg; }
+                                        Body { text: root.home-text; font-size: 13px; }
+                                    }
+                                    VerticalLayout {
+                                        alignment: center;
+                                        spacing: 10px;
+                                        Btn { text: "Quick scan"; has-icon: true; icon: Assets.i-scan; enabled: root.engine-ready && !root.scanning; clicked => { root.go("scan"); root.start-scan("quick"); } }
+                                        if root.needs-rules: Btn { text: root.updating ? "Downloading…" : "Get rules"; kind: "ghost"; small: true; enabled: !root.updating; clicked => { root.update-rules(); } }
+                                        if !root.needs-rules: Btn { text: "More scans"; kind: "ghost"; small: true; clicked => { root.go("scan"); } }
+                                    }
+                                }
+                            }
+                            // numbers
+                            HorizontalLayout {
+                                spacing: 12px;
+                                for s in root.home-stats: Stat {
+                                    label: s.label;
+                                    value: s.value;
+                                    sub: s.sub;
+                                    led: s.tone == "" ? transparent : Theme.tone(s.tone);
+                                    tone: s.tone == "alarm" ? Theme.alarm : Theme.fg;
+                                }
+                            }
+                            // every shield, and the threat map
+                            HorizontalLayout {
+                                spacing: 12px;
+                                Panel {
+                                    horizontal-stretch: 3;
+                                    VerticalLayout {
+                                        padding: 16px;
+                                        spacing: 12px;
+                                        PanelHead { title: "Protection"; note: root.shields-on + " shields on"; }
+                                        Rectangle {
+                                            height: Math.ceil(root.status-rows.length / 2) * 44px - 4px;
+                                            for r[i] in root.status-rows: Rectangle {
+                                                x: Math.mod(i, 2) * (parent.width / 2 + 2px);
+                                                y: Math.floor(i / 2) * 44px;
+                                                width: parent.width / 2 - 2px;
+                                                height: 40px;
+                                                background: Theme.raised.with-alpha(0.55);
+                                                Rectangle { x: 0; y: 0; width: 2px; height: parent.height; background: Theme.tone(r.tone); }
+                                                Rectangle { x: 12px; y: 10px; width: 6px; height: 6px; background: Theme.tone(r.tone); }
+                                                Text { x: 26px; y: 5px; width: parent.width - 34px; text: r.name; font-family: Theme.body; font-size: 12.5px; font-weight: 600; color: Theme.fg; overflow: elide; }
+                                                Mono { x: 26px; y: 22px; width: parent.width - 34px; text: r.value; font-size: 10.5px; color: Theme.fg-3; }
+                                            }
+                                        }
+                                    }
+                                }
+                                Panel {
+                                    horizontal-stretch: 2;
+                                    VerticalLayout {
+                                        padding: 16px;
+                                        spacing: 12px;
+                                        alignment: start;
+                                        PanelHead { title: "Threat map"; note: "26 weeks"; }
+                                        Heat { cells: root.heat-short; cell: 9px; gap: 3px; }
+                                        Legend { }
+                                    }
+                                }
+                            }
+                            // activity, and shortcuts
+                            HorizontalLayout {
+                                spacing: 12px;
+                                Panel {
+                                    horizontal-stretch: 3;
+                                    VerticalLayout {
+                                        padding: 16px;
+                                        spacing: 6px;
+                                        alignment: start;
+                                        HorizontalLayout {
+                                            PanelHead { title: "Recent activity"; note: ""; }
+                                            Btn { text: "All history"; kind: "quiet"; small: true; clicked => { root.go("history"); } }
+                                        }
+                                        if root.home-events.length == 0: Mono { text: "Nothing yet. Scans, shield alerts and fixes appear here."; color: Theme.fg-3; }
+                                        for e in root.home-events: HorizontalLayout {
+                                            spacing: 10px;
+                                            height: 26px;
+                                            Mono { text: e.when; width: 96px; color: Theme.fg-3; font-size: 11px; vertical-alignment: center; }
+                                            VerticalLayout { alignment: center; Rectangle { width: 6px; height: 6px; background: Theme.tone(e.tone); } }
+                                            Text { text: e.title; font-family: Theme.body; font-size: 12.5px; color: Theme.fg; overflow: elide; vertical-alignment: center; horizontal-stretch: 1; }
+                                            Mono { text: e.chip; color: Theme.tone(e.tone); font-size: 10px; vertical-alignment: center; }
+                                        }
+                                    }
+                                }
+                                Panel {
+                                    horizontal-stretch: 2;
+                                    VerticalLayout {
+                                        padding: 16px;
+                                        spacing: 10px;
+                                        alignment: start;
+                                        PanelHead { title: "Shortcuts"; note: ""; }
+                                        GridLayout {
+                                            spacing: 8px;
+                                            Row {
+                                                Shortcut { icon: Assets.i-disk; text: "Full scan"; hint: "30+ MIN"; clicked => { root.go("scan"); root.scan-choice = "full"; } }
+                                                Shortcut { icon: Assets.i-bolt; text: "Startup"; hint: "AUTORUNS"; clicked => { root.go("startup"); } }
+                                            }
+                                            Row {
+                                                Shortcut { icon: Assets.i-tasks; text: "Tasks"; hint: "MEMORY"; clicked => { root.go("tasks"); } }
+                                                Shortcut { icon: Assets.i-sparkle; text: "Clean up"; hint: "CACHE"; clicked => { root.go("cleaner"); } }
+                                            }
+                                            Row {
+                                                Shortcut { icon: Assets.i-terminal; text: "Audit a project"; hint: "DEV"; clicked => { root.go("dev"); } }
+                                                Shortcut { icon: Assets.i-vault; text: "Quarantine"; hint: root.vault-rows.length + " FILES"; clicked => { root.go("vault"); } }
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -1228,99 +1497,109 @@ export component AppWindow inherits Window {
                     }
                 }
 
-                // SCAN · running / finished
+                // SCAN · running / finished: a compact HUD.
                 if root.page == "scan" && root.scan-started: Screen {
-                    HorizontalLayout {
-                        padding: 34px;
-                        padding-top: 30px;
-                        spacing: 26px;
-                        // The scanner
-                        VerticalLayout {
-                        alignment: start;
-                        Panel {
-                            width: 330px;
-                            raised: true;
-                            edge: root.flash ? (Math.mod(root.frame, 4) < 2 ? Theme.alarm : Theme.line) : Theme.line;
+                    VerticalLayout {
+                        padding: 24px;
+                        padding-top: 20px;
+                        spacing: 14px;
+                        HorizontalLayout {
+                            spacing: 14px;
                             VerticalLayout {
-                                padding: 24px;
-                                spacing: 18px;
-                                Rectangle {
-                                    height: 250px;
-                                    property <length> cx: self.width / 2;
-                                    property <length> cy: self.height / 2;
-                                    // orbiting pixels, snapped to a 4 px grid
-                                    for i in 12: Rectangle {
-                                        property <angle> a: (root.frame * 3 + i * 30) * 1deg;
-                                        property <length> r: 108px + (Math.mod(i, 2) == 0 ? 0px : 10px);
-                                        x: Math.round((parent.cx + self.r * Math.cos(self.a)) / 4px) * 4px - 3px;
-                                        y: Math.round((parent.cy + self.r * Math.sin(self.a) * 0.92) / 4px) * 4px - 3px;
-                                        width: Math.mod(i, 3) == 0 ? 8px : 6px;
-                                        height: self.width;
-                                        visible: root.scanning && !root.paused;
-                                        background: root.scan-threats > 0 && Math.mod(i, 4) == 0 ? Theme.alarm : i == 0 ? Theme.oxide : Theme.signal.with-alpha(0.35 + Math.mod(i, 3) * 0.25);
-                                    }
-                                    PixelMark {
-                                        x: parent.cx - self.width / 2 + (root.flash ? (Math.mod(root.frame, 2) == 0 ? 4px : -4px) : 0px);
-                                        y: parent.cy - self.height / 2;
-                                        size: 160px;
-                                        state: root.scanning ? (root.scan-threats > 0 ? "alarm" : "scan") : root.scan-threats > 0 ? "alarm" : "safe";
-                                        blink: root.scanning && !root.paused;
-                                        scan-row: root.scanning && !root.paused ? Math.mod(Math.floor(root.frame / 2), 20) - 2 : -1;
-                                        frame: root.frame;
-                                    }
-                                }
-                                VerticalLayout {
-                                    spacing: 6px;
-                                    Eyebrow { text: root.scanning ? (root.paused ? "PAUSED" : "READING") : "DONE"; color: root.scanning ? Theme.signal : Theme.fg-3; }
-                                    Text { text: root.scan-bytes; font-family: Theme.mono; font-size: 13px; color: Theme.fg; letter-spacing: 1px; }
-                                    Mono { text: root.scan-path; color: Theme.fg-3; font-size: 11px; }
-                                }
-                            }
-                        }
-                        }
-                        // Numbers and controls
-                        VerticalLayout {
-                            spacing: 20px;
-                            alignment: start;
-                            horizontal-stretch: 1;
-                            Header { eyebrow: root.scan-kind; title: root.scan-title; text: root.scan-text; }
-                            Blocks { value: root.scan-fraction; frame: root.frame; }
-                            HorizontalLayout {
-                                spacing: 14px;
-                                Stat { label: "FILES CHECKED"; value: root.scan-files; }
-                                Stat { label: "FOUND"; value: root.scan-threats; tone: root.scan-threats > 0 ? Theme.alarm : Theme.fg; }
-                                Stat { label: "FILES / SEC"; value: root.scan-speed; }
-                                Stat { label: "TIME"; value: root.scan-time; }
-                            }
-                            Panel {
-                                VerticalLayout {
-                                    padding: 16px;
+                                spacing: 4px;
+                                horizontal-stretch: 1;
+                                HorizontalLayout {
                                     spacing: 10px;
-                                    HorizontalLayout {
-                                        Eyebrow { text: "PROGRESS MAP"; }
-                                        Rectangle { horizontal-stretch: 1; }
-                                        Mono { text: "one square ≈ 1/288 of the scan"; color: Theme.fg-3; font-size: 11px; }
+                                    alignment: start;
+                                    Chip {
+                                        text: root.scanning ? (root.paused ? "PAUSED" : "LIVE") : root.scan-threats > 0 ? "THREATS FOUND" : "DONE";
+                                        tone: root.scanning ? (root.paused ? Theme.amber : Theme.signal) : root.scan-threats > 0 ? Theme.alarm : Theme.accent;
                                     }
-                                    Rectangle {
-                                        height: 6 * 13px;
-                                        for c[i] in root.grid-cells: Rectangle {
-                                            x: Math.mod(i, 48) * (parent.width / 48);
-                                            y: Math.floor(i / 48) * 13px;
-                                            width: parent.width / 48 - 3px;
-                                            height: 10px;
-                                            background: c == 3 ? Theme.alarm : c == 2 ? Theme.signal : c == 1 ? Theme.heat-2 : Theme.raised;
+                                    Eyebrow { text: root.scan-kind; vertical-alignment: center; }
+                                }
+                                Text { text: root.scan-title; font-family: Theme.pixel; font-size: 26px; font-weight: 600; color: Theme.fg; }
+                                Mono { text: root.scan-text; color: Theme.fg-2; font-size: 12px; }
+                            }
+                            VerticalLayout {
+                                alignment: center;
+                                HorizontalLayout {
+                                    spacing: 10px;
+                                    if root.scanning: Btn { text: root.paused ? "Resume" : "Pause"; kind: "ghost"; small: true; clicked => { root.pause-scan(); } }
+                                    if root.scanning: Btn { text: "Stop"; kind: "ghost"; small: true; clicked => { root.stop-scan(); } }
+                                    if !root.scanning && root.scan-threats > 0: Btn { text: "Review results"; kind: "danger"; small: true; has-icon: true; icon: Assets.i-bug; clicked => { root.go("results"); } }
+                                    if !root.scanning: Btn { text: "New scan"; kind: root.scan-threats > 0 ? "ghost" : "primary"; small: true; clicked => { root.navigate("scan-new"); } }
+                                    if !root.scanning: Btn { text: "Home"; kind: "ghost"; small: true; clicked => { root.go("home"); } }
+                                }
+                            }
+                        }
+                        Panel {
+                            vertical-stretch: 0;
+                            VerticalLayout {
+                                padding: 14px;
+                                spacing: 8px;
+                                PanelHead { title: "Progress"; note: root.scan-fraction >= 0 ? Math.floor(root.scan-fraction * 100) + "%" : "counting files…"; }
+                                Blocks { value: root.scan-fraction; frame: root.frame; height: 10px; }
+                            }
+                        }
+                        HorizontalLayout {
+                            spacing: 12px;
+                            vertical-stretch: 0;
+                            Stat { label: "FILES CHECKED"; value: root.scan-files; }
+                            Stat { label: "FOUND"; value: root.scan-threats; tone: root.scan-threats > 0 ? Theme.alarm : Theme.fg; led: root.scan-threats > 0 ? Theme.alarm : Theme.accent; }
+                            Stat { label: "FILES / SEC"; value: root.scan-speed; }
+                            Stat { label: "ELAPSED"; value: root.scan-time; }
+                        }
+                        HorizontalLayout {
+                            spacing: 12px;
+                            vertical-stretch: 1;
+                            Panel {
+                                width: 300px;
+                                edge: root.flash ? (Math.mod(root.frame, 4) < 2 ? Theme.alarm : Theme.line) : Theme.line;
+                                VerticalLayout {
+                                    padding: 14px;
+                                    spacing: 10px;
+                                    PanelHead { title: "Live"; note: root.scanning ? (root.paused ? "paused" : "reading") : "idle"; }
+                                    Radar {
+                                        min-height: 150px;
+                                        vertical-stretch: 1;
+                                        frame: root.frame;
+                                        active: root.scanning && !root.paused;
+                                        state: root.scanning ? (root.scan-threats > 0 ? "alarm" : "scan") : root.scan-threats > 0 ? "alarm" : "safe";
+                                    }
+                                    Text { text: root.scan-bytes; font-family: Theme.mono; font-size: 11.5px; color: Theme.fg; letter-spacing: 1px; }
+                                    Mono { text: root.scan-path; color: Theme.fg-3; font-size: 10.5px; }
+                                }
+                            }
+                            VerticalLayout {
+                                spacing: 12px;
+                                horizontal-stretch: 1;
+                                Panel {
+                                    vertical-stretch: 0;
+                                    VerticalLayout {
+                                        padding: 14px;
+                                        spacing: 10px;
+                                        PanelHead { title: "Progress map"; note: "1 square ≈ 1/288 of the scan"; }
+                                        Rectangle {
+                                            height: 6 * 11px;
+                                            for c[i] in root.grid-cells: Rectangle {
+                                                x: Math.mod(i, 48) * (parent.width / 48);
+                                                y: Math.floor(i / 48) * 11px;
+                                                width: parent.width / 48 - 2px;
+                                                height: 8px;
+                                                background: c == 3 ? Theme.alarm : c == 2 ? Theme.signal : c == 1 ? Theme.heat-2 : Theme.raised;
+                                            }
                                         }
                                     }
                                 }
-                            }
-                            HorizontalLayout {
-                                spacing: 14px;
-                                alignment: start;
-                                if root.scanning: Btn { text: root.paused ? "Resume" : "Pause"; kind: "ghost"; clicked => { root.pause-scan(); } }
-                                if root.scanning: Btn { text: "Stop"; kind: "ghost"; clicked => { root.stop-scan(); } }
-                                if !root.scanning && root.scan-threats > 0: Btn { text: "Review results"; kind: "danger"; has-icon: true; icon: Assets.i-bug; clicked => { root.go("results"); } }
-                                if !root.scanning: Btn { text: "New scan"; kind: root.scan-threats > 0 ? "ghost" : "primary"; clicked => { root.navigate("scan-new"); } }
-                                if !root.scanning: Btn { text: "Home"; kind: "ghost"; clicked => { root.go("home"); } }
+                                Panel {
+                                    vertical-stretch: 1;
+                                    VerticalLayout {
+                                        padding: 14px;
+                                        spacing: 10px;
+                                        PanelHead { title: "Throughput"; note: root.scan-speed + " files/s"; }
+                                        Spark { min-height: 64px; vertical-stretch: 1; values: root.scan-speed-history; tone: root.scan-threats > 0 ? Theme.alarm : Theme.signal; }
+                                    }
+                                }
                             }
                         }
                     }
@@ -2009,6 +2288,7 @@ export component AppWindow inherits Window {
                                 VerticalLayout {
                                     SettingRow { title: "Cloud reputation"; text: "When a program or script lands, Hexward sends the first 6 of the 64 characters of its fingerprint and compares the answer on this PC. The server can't tell which file it was."; Switch { checked: root.cloud-reputation; toggled(v) => { root.set-cloud-reputation(v); } } }
                                     SettingRow { title: "Send detection reports"; text: "The file's name (never its folder), fingerprint and detection name, so false alarms get fixed for everyone. Kept 90 days. Allow also reports a false alarm."; Switch { checked: root.cloud-reports; toggled(v) => { root.set-cloud-reports(v); } } }
+                                    SettingRow { title: "Share anonymous counts"; text: "Once an hour, sends only numbers (scans, files, threats found, quarantined and blocked; includes results already in your History, once) for the counter on hexward.onurilabs.com, never file names, fingerprints or folders."; Switch { checked: root.cloud-counts; toggled(v) => { root.set-cloud-counts(v); } } }
                                     SettingRow { title: "Send samples to the lab"; text: "Adds a \"Send to lab\" button to results. Nothing is sent until you click it. See hexward.onurilabs.com/transparency."; last: true; Switch { checked: root.cloud-samples; toggled(v) => { root.set-cloud-samples(v); } } }
                                 }
                             }
@@ -2127,31 +2407,22 @@ export component AppWindow inherits Window {
     if !root.is-max: ResizeEdge { x: root.width - 10px; y: root.height - 10px; width: 10px; height: 10px; mouse-cursor: nwse-resize; dir: "se"; resize(d) => { root.resize-window(d); } }
     if !root.is-max: ResizeEdge { x: 0; y: root.height - 10px; width: 10px; height: 10px; mouse-cursor: nesw-resize; dir: "sw"; resize(d) => { root.resize-window(d); } }
 
-    // Toast
-    if root.toast-visible: Panel {
-        property <bool> shown: false;
-        raised: true;
-        edge: Theme.tone(root.toast-state).with-alpha(0.7);
-        width: 392px;
-        height: 88px;
-        x: root.width - self.width - 30px;
-        y: root.height - self.height - 30px + (self.shown ? 0px : 24px);
-        opacity: self.shown ? 1 : 0;
-        animate y { duration: 220ms; easing: ease-out; }
-        animate opacity { duration: 160ms; }
-        init => {
-            self.shown = true;
-        }
-        HorizontalLayout {
-            padding: 16px;
-            spacing: 14px;
-            VerticalLayout { alignment: start; PixelMark { size: 32px; state: root.toast-state; } }
-            VerticalLayout {
-                spacing: 3px;
-                alignment: start;
-                Text { text: root.toast-title; font-family: Theme.body; font-size: 14px; font-weight: 600; color: Theme.fg; }
-                Body { text: root.toast-text; font-size: 12px; }
+    // Toasts: up to three, newest at the bottom, each as tall as its text.
+    VerticalLayout {
+        width: 400px;
+        x: root.width - self.width - 24px;
+        y: root.height - self.preferred-height - 24px;
+        height: self.preferred-height;
+        spacing: 10px;
+        for t in root.toasts: ToastCard {
+            item: t;
+            frame: root.frame;
+            dismiss => { root.toast-dismiss(t.id); }
+            act => {
+                root.toast-act(t.id);
+                if t.target != "" { root.go(t.target); }
             }
+            hover(h) => { root.toast-hover(t.id, h); }
         }
     }
 }

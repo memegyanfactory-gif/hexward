@@ -119,6 +119,7 @@ Cleaner
 - [x] Separate opt-in for detection reports and sample upload; published retention policy (90 days, [docs/PRIVACY.md](docs/PRIVACY.md))
 - [x] Dashboard: detections over time, false-alarm reports, supply-chain findings; database feeding rule packs
 - [x] Transparency report, live at [hexward.onurilabs.com/transparency](https://hexward.onurilabs.com/transparency)
+- [x] Opt-in anonymous counts (scans, files, threats found, quarantined, blocked; numbers only) for "Threats caught so far" on the website
 
 ---
 

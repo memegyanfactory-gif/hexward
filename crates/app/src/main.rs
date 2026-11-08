@@ -28,6 +28,7 @@ use hexward_engine::scan::count_files;
 use hexward_engine::startup::{self, StartupItem};
 use hexward_engine::{Detection, Engine, FileReport, Progress, ScanOptions, ScanSummary, Severity, Vault, allowlist, data_dir, locations};
 use hexward_update::app::{self as appupdate, AppRelease};
+use hexward_update::counts::{self, Counts};
 use serde::{Deserialize, Serialize};
 use slint::{ComponentHandle, Image, Model, ModelRc, Rgba8Pixel, SharedPixelBuffer, SharedString, Timer, TimerMode, VecModel};
 
@@ -65,6 +66,8 @@ struct Settings {
     cloud_reputation: bool,
     /// Opt-in cloud: send detection and false-alarm reports.
     cloud_reports: bool,
+    /// Opt-in cloud: send anonymous counts (numbers only) for "Threats caught so far".
+    cloud_counts: bool,
     /// Opt-in cloud: show "Send to lab" on scan results.
     cloud_samples: bool,
     /// Keep a private copy of documents and photos, for ransomware rollback.
@@ -92,6 +95,7 @@ impl Default for Settings {
             ransomware_shield: true,
             cloud_reputation: false,
             cloud_reports: false,
+            cloud_counts: false,
             cloud_samples: false,
             document_backup: true,
         }
@@ -137,6 +141,9 @@ struct ScanJob {
     seen_threats: u64,
     threat_cells: Vec<usize>,
     ticks: usize,
+    /// Files per second, one sample every half second, for the throughput graph.
+    speeds: std::collections::VecDeque<f32>,
+    last_files: u64,
 }
 
 impl ScanJob {
@@ -174,7 +181,10 @@ struct State {
     startup_checked_at: Option<chrono::DateTime<Utc>>,
     update_slot: Slot<Result<hexward_update::Report, String>>,
     vault_rows: Rc<VecModel<VaultRow>>,
-    toast_until: Option<Instant>,
+    toasts: Rc<VecModel<ToastItem>>,
+    toast_meta: Vec<ToastMeta>,
+    toast_seq: i32,
+    toast_fresh_until: Option<Instant>,
     flash_until: Option<Instant>,
     release: Option<AppRelease>,
     app_check_slot: Slot<Result<Option<AppRelease>, String>>,
@@ -186,6 +196,9 @@ struct State {
     /// Result of "Send to lab": (file name, sample id or error).
     sample_slot: Slot<(String, Result<String, String>)>,
     restore_slot: Slot<Vec<hexward_engine::backup::Restored>>,
+    /// "Share anonymous counts": a send is running, and when to look again whether one is due.
+    counts_busy: Arc<AtomicBool>,
+    next_counts_check: Instant,
     /// Why it's quiet time right now (full-screen game, presentation), if it is.
     quiet: Option<&'static str>,
     next_quiet_check: Instant,
@@ -280,6 +293,12 @@ fn icon(name: &str) -> Image {
 
 pub(crate) fn set_assets(ui: &AppWindow) {
     let a = ui.global::<Assets>();
+    // The backdrop: one 2 × 2 dot in a 16 × 16 tile, coloured by the theme.
+    let mut tile = vec![0u8; 16 * 16 * 4];
+    for (x, y) in [(7, 7), (8, 7), (7, 8), (8, 8)] {
+        tile[(y * 16 + x) * 4..(y * 16 + x) * 4 + 4].copy_from_slice(&[255, 255, 255, 255]);
+    }
+    a.set_dot_tile(to_image((16, 16, tile)));
     let mut dots = Vec::new();
     for (y, row) in art::MARK.iter().enumerate() {
         for (x, ch) in row.chars().enumerate() {
@@ -317,20 +336,85 @@ pub(crate) fn set_assets(ui: &AppWindow) {
     ui.set_app_icon(to_image(art::render(&art::MARK, 4, art::mark_color(art::MOSS_HI, art::MOSS_LO, Some(art::OXIDE)))));
 }
 
+/// How long a toast stays: a threat with something to do stays until it's dealt with.
+struct ToastMeta {
+    id: i32,
+    total: Duration,
+    left: Duration,
+    hovered: bool,
+}
+
 fn toast(st: &mut State, ui: &AppWindow, state: &str, title: &str, text: &str) {
-    ui.set_toast_visible(false);
-    ui.set_toast_state(state.into());
-    ui.set_toast_title(title.into());
-    ui.set_toast_text(text.into());
-    ui.set_toast_visible(true);
-    st.toast_until = Some(Instant::now() + Duration::from_millis(5000));
+    toast_with(st, ui, state, title, text, "", "");
+}
+
+/// A toast in the app (at most three, newest at the bottom) and, when the window is hidden or it's a
+/// threat, a Windows notification. `action` is a button label; `target` the page it opens.
+fn toast_with(st: &mut State, ui: &AppWindow, state: &str, title: &str, text: &str, action: &str, target: &str) {
+    st.toast_seq += 1;
+    let id = st.toast_seq;
+    let total = match state {
+        "alarm" if !action.is_empty() => Duration::ZERO,
+        "alarm" => Duration::from_secs(12),
+        "warn" => Duration::from_secs(8),
+        _ => Duration::from_secs(5),
+    };
+    st.toasts.push(ToastItem {
+        id,
+        state: state.into(),
+        title: title.into(),
+        text: text.into(),
+        action: action.into(),
+        target: target.into(),
+        life: if total.is_zero() { -1.0 } else { 1.0 },
+    });
+    st.toast_meta.push(ToastMeta { id, total, left: total, hovered: false });
+    while st.toasts.row_count() > 3 {
+        st.toasts.remove(0);
+        st.toast_meta.remove(0);
+    }
+    if state == "alarm" {
+        st.toast_fresh_until = Some(Instant::now() + Duration::from_millis(900));
+        ui.set_toast_fresh(true);
+    }
     if !st.window_visible || state == "alarm" {
         // Quiet mode: hold everything except real threats until the game or presentation ends.
         if st.quiet.is_some() && state != "alarm" {
             st.held.push(title.to_string());
         } else {
-            notify(title, text);
+            notify_as(state, title, text);
         }
+    }
+}
+
+fn remove_toast(st: &mut State, id: i32) {
+    if let Some(i) = st.toast_meta.iter().position(|m| m.id == id) {
+        st.toast_meta.remove(i);
+        st.toasts.remove(i);
+    }
+}
+
+/// Counts toasts down (paused while hovered) and drops the ones whose time is up.
+fn tick_toasts(st: &mut State, ui: &AppWindow, dt: Duration) {
+    if st.toast_fresh_until.is_some_and(|t| Instant::now() > t) {
+        st.toast_fresh_until = None;
+        ui.set_toast_fresh(false);
+    }
+    let mut gone = Vec::new();
+    for (i, m) in st.toast_meta.iter_mut().enumerate() {
+        if m.total.is_zero() || m.hovered {
+            continue;
+        }
+        m.left = m.left.saturating_sub(dt);
+        if m.left.is_zero() {
+            gone.push(m.id);
+        } else if let Some(mut row) = st.toasts.row_data(i) {
+            row.life = m.left.as_secs_f32() / m.total.as_secs_f32();
+            st.toasts.set_row_data(i, row);
+        }
+    }
+    for id in gone {
+        remove_toast(st, id);
     }
 }
 
@@ -416,12 +500,99 @@ fn tick_quiet(st: &mut State, ui: &AppWindow) {
     }
 }
 
-/// Windows notification (Action Center). Runs on its own thread: showing one can take a moment.
+/// Windows notification (Action Center), as plain information.
 fn notify(title: &str, text: &str) {
-    let (t, b) = (title.to_string(), text.to_string());
-    std::thread::spawn(move || {
-        let _ = notify_rust::Notification::new().appname("Hexward").summary(&t).body(&b).show();
-    });
+    notify_as("scan", title, text);
+}
+
+/// Windows notification from Hexward itself: its name, the pixel shield with the status-coloured core,
+/// and an "Open Hexward" button. Threats stay on screen until dismissed.
+fn notify_as(state: &str, title: &str, text: &str) {
+    #[cfg(windows)]
+    winnote::show(state, title, text);
+    #[cfg(not(windows))]
+    {
+        let _ = state;
+        let (t, b) = (title.to_string(), text.to_string());
+        std::thread::spawn(move || {
+            let _ = notify_rust::Notification::new().appname("Hexward").summary(&t).body(&b).show();
+        });
+    }
+}
+
+/// Windows notifications that come from "Hexward" (not from the program that happened to send them),
+/// with the pixel shield as their picture. Unpackaged apps get a name and icon in Windows' toast
+/// system by registering an AppUserModelID under HKCU, which needs no admin rights.
+#[cfg(windows)]
+mod winnote {
+    use std::path::PathBuf;
+    use std::sync::Once;
+    use std::sync::atomic::AtomicBool;
+    use std::time::Duration;
+
+    pub const AUMID: &str = "OnuriLabs.Hexward";
+    /// Set when the user clicks a notification; the UI timer brings the window forward.
+    pub static RAISE: AtomicBool = AtomicBool::new(false);
+    static REGISTER: Once = Once::new();
+
+    /// The shield as a PNG, its core in the status colour (written once per state).
+    fn mark_png(state: &str) -> Option<PathBuf> {
+        let dir = hexward_engine::data_dir().join("notify");
+        let path = dir.join(format!("hexward-{state}.png"));
+        if path.exists() {
+            return Some(path);
+        }
+        let core = match state {
+            "alarm" => [0xFF, 0x54, 0x68, 0xFF],
+            "warn" => [0xFF, 0xB5, 0x47, 0xFF],
+            "safe" => crate::art::MOSS_HI,
+            "scan" => [0x5A, 0xA9, 0xFF, 0xFF],
+            _ => crate::art::OXIDE,
+        };
+        let (w, h, rgba) = crate::art::render(&crate::art::MARK, 6, crate::art::mark_color(crate::art::MOSS_HI, crate::art::MOSS_LO, Some(core)));
+        std::fs::create_dir_all(&dir).ok()?;
+        let file = std::fs::File::create(&path).ok()?;
+        let mut enc = png::Encoder::new(std::io::BufWriter::new(file), w, h);
+        enc.set_color(png::ColorType::Rgba);
+        enc.set_depth(png::BitDepth::Eight);
+        enc.write_header().ok()?.write_image_data(&rgba).ok()?;
+        Some(path)
+    }
+
+    fn register() {
+        REGISTER.call_once(|| {
+            use winreg::RegKey;
+            use winreg::enums::HKEY_CURRENT_USER;
+            if let Ok((key, _)) = RegKey::predef(HKEY_CURRENT_USER).create_subkey(format!(r"Software\Classes\AppUserModelId\{AUMID}")) {
+                let _ = key.set_value("DisplayName", &"Hexward");
+                if let Some(icon) = mark_png("brand") {
+                    let _ = key.set_value("IconUri", &icon.display().to_string());
+                }
+                let _ = key.set_value("IconBackgroundColor", &"FF0B0F14");
+            }
+        });
+    }
+
+    pub fn show(state: &str, title: &str, text: &str) {
+        let (state, title, text) = (state.to_string(), title.to_string(), text.to_string());
+        std::thread::spawn(move || {
+            use tauri_winrt_notification::{IconCrop, Scenario, Toast};
+            register();
+            let sticky = state == "alarm";
+            let mut toast = Toast::new(AUMID).title(&title).text1(&text).scenario(if sticky { Scenario::Reminder } else { Scenario::Default });
+            if let Some(icon) = mark_png(&state) {
+                toast = toast.icon(&icon, IconCrop::Square, "Hexward");
+            }
+            let toast = toast.add_button("Open Hexward", "open").on_activated(|_| {
+                RAISE.store(true, std::sync::atomic::Ordering::Relaxed);
+                Ok(())
+            });
+            if toast.show().is_ok() {
+                // Keep the click handler alive while the notification can still be clicked.
+                std::thread::sleep(if sticky { Duration::from_secs(3600) } else { Duration::from_secs(120) });
+            }
+        });
+    }
 }
 
 fn log(kind: EventKind, title: impl Into<String>, detail: impl Into<String>) {
@@ -520,14 +691,26 @@ fn refresh_home(st: &State, ui: &AppWindow) {
     let manifest = hexward_update::read_manifest(&hexward_update::rules_dir());
     let updated = manifest.yara_forge.as_ref().map(|f| when(f.updated_at)).unwrap_or_else(|| "Never".into());
     let rules = st.engine.as_ref().map(|e| thousands(e.rule_count() as u64)).unwrap_or_else(|| "…".into());
-    ui.set_home_stats(ModelRc::new(VecModel::from(vec![
-        StatItem { label: "CHECKED TODAY".into(), value: thousands(files_today).into() },
-        StatItem { label: "FOUND · 30 DAYS".into(), value: thousands(found_30).into() },
-        StatItem { label: "RULES".into(), value: rules.clone().into() },
-        StatItem { label: "RULES UPDATED".into(), value: updated.into() },
-    ])));
-
     let vault_n = st.vault_rows.row_count();
+    let script_on = amsi::is_registered() && st.settings.script_shield;
+    let on = [st.settings.file_shield, st.settings.process_shield, st.settings.clickfix_shield, st.settings.stealer_shield, st.settings.ransomware_shield, script_on];
+    let shields_on = format!("{}/{}", on.iter().filter(|b| **b).count(), on.len());
+    ui.set_shields_on(shields_on.clone().into());
+    let last_scan = events.iter().find(|e| e.kind == EventKind::Scan);
+    ui.set_home_stats(ModelRc::new(VecModel::from(vec![
+        StatItem { label: "CHECKED TODAY".into(), value: thousands(files_today).into(), sub: "files".into(), tone: "".into() },
+        StatItem { label: "FOUND · 30D".into(), value: thousands(found_30).into(), sub: "threats".into(), tone: if found_30 > 0 { "alarm".into() } else { "safe".into() } },
+        StatItem { label: "QUARANTINED".into(), value: thousands(vault_n as u64).into(), sub: "locked away".into(), tone: "".into() },
+        StatItem { label: "SHIELDS".into(), value: shields_on.into(), sub: "on".into(), tone: if on.iter().all(|b| *b) { "safe".into() } else { "warn".into() } },
+        StatItem { label: "RULES".into(), value: rules.clone().into(), sub: format!("updated {updated}").into(), tone: if pack { "safe".into() } else { "warn".into() } },
+        StatItem {
+            label: "LAST SCAN".into(),
+            value: last_scan.map(|e| when(e.at)).unwrap_or_else(|| "never".into()).into(),
+            sub: last_scan.map(|e| format!("{} files", thousands(e.files))).unwrap_or_else(|| "run a quick scan".into()).into(),
+            tone: "".into(),
+        },
+    ])));
+    ui.set_home_events(ModelRc::new(VecModel::from(events.iter().take(6).map(event_row).collect::<Vec<_>>())));
     let rows = vec![
         StatusRow { name: "On-demand scanner".into(), value: if st.engine.is_some() { "Ready".into() } else { "Loading".into() }, tone: if st.engine.is_some() { "safe".into() } else { "scan".into() } },
         StatusRow { name: "Rule pack".into(), value: if pack { format!("{rules} rules").into() } else { "Not downloaded".into() }, tone: if pack { "safe".into() } else { "warn".into() } },
@@ -594,26 +777,24 @@ fn refresh_home(st: &State, ui: &AppWindow) {
     ui.set_heat_year(ModelRc::new(VecModel::from(heat_cells(&daily, 52))));
 }
 
+fn event_row(e: &Event) -> EventRow {
+    let (chip, tone) = match e.kind {
+        EventKind::Scan if e.threats > 0 => ("SCAN", "alarm"),
+        EventKind::Scan => ("SCAN", "safe"),
+        EventKind::Quarantine => ("QUARANTINE", "warn"),
+        EventKind::Restore => ("RESTORE", "scan"),
+        EventKind::Delete => ("DELETE", "off"),
+        EventKind::Update => ("UPDATE", "scan"),
+        EventKind::StartupFix => ("STARTUP", "oxide"),
+        EventKind::EndTask => ("TASK", "warn"),
+        EventKind::Clean => ("CLEAN", "safe"),
+    };
+    EventRow { when: when(e.at).into(), title: e.title.clone().into(), detail: e.detail.clone().into(), chip: chip.into(), tone: tone.into() }
+}
+
 fn refresh_history(ui: &AppWindow) {
     let events = history::load();
-    let rows: Vec<EventRow> = events
-        .iter()
-        .take(400)
-        .map(|e| {
-            let (chip, tone) = match e.kind {
-                EventKind::Scan if e.threats > 0 => ("SCAN", "alarm"),
-                EventKind::Scan => ("SCAN", "safe"),
-                EventKind::Quarantine => ("QUARANTINE", "warn"),
-                EventKind::Restore => ("RESTORE", "scan"),
-                EventKind::Delete => ("DELETE", "off"),
-                EventKind::Update => ("UPDATE", "scan"),
-                EventKind::StartupFix => ("STARTUP", "oxide"),
-                EventKind::EndTask => ("TASK", "warn"),
-                EventKind::Clean => ("CLEAN", "safe"),
-            };
-            EventRow { when: when(e.at).into(), title: e.title.clone().into(), detail: e.detail.clone().into(), chip: chip.into(), tone: tone.into() }
-        })
-        .collect();
+    let rows: Vec<EventRow> = events.iter().take(400).map(event_row).collect();
     ui.set_events(ModelRc::new(VecModel::from(rows)));
     ui.set_heat_year(ModelRc::new(VecModel::from(heat_cells(&history::daily(&events), 52))));
 }
@@ -642,6 +823,7 @@ fn refresh_settings(st: &State, ui: &AppWindow) {
     ui.set_cloud_reputation(st.settings.cloud_reputation);
     ui.set_cloud_reports(st.settings.cloud_reports);
     ui.set_cloud_samples(st.settings.cloud_samples);
+    ui.set_cloud_counts(st.settings.cloud_counts);
     ui.set_document_backup(st.settings.document_backup);
     ui.set_script_shield(st.settings.script_shield && amsi::is_registered());
     ui.set_file_shield(st.settings.file_shield);
@@ -747,7 +929,10 @@ fn start_scan(st: &mut State, ui: &AppWindow, kind: &'static str) {
         seen_threats: 0,
         threat_cells: Vec::new(),
         ticks: 0,
+        speeds: std::collections::VecDeque::new(),
+        last_files: 0,
     });
+    ui.set_scan_speed_history(ModelRc::new(VecModel::from(Vec::<f32>::new())));
     ui.set_scan_kind(kind_label(kind).to_uppercase().into());
     ui.set_scanning(true);
     ui.set_paused(false);
@@ -802,6 +987,16 @@ fn tick_scan(st: &mut State, ui: &AppWindow) {
         .collect();
     ui.set_grid_cells(ModelRc::new(VecModel::from(cells)));
 
+    if job.ticks % 5 == 0 {
+        let rate = if job.paused_at.is_some() { 0.0 } else { (files.saturating_sub(job.last_files)) as f32 / 0.5 };
+        job.last_files = files;
+        job.speeds.push_back(rate);
+        while job.speeds.len() > 60 {
+            job.speeds.pop_front();
+        }
+        let top = job.speeds.iter().cloned().fold(1.0f32, f32::max);
+        ui.set_scan_speed_history(ModelRc::new(VecModel::from(job.speeds.iter().map(|v| v / top).collect::<Vec<f32>>())));
+    }
     ui.set_scan_files(thousands(files).into());
     ui.set_scan_threats(found as i32);
     ui.set_scan_speed(if job.paused_at.is_some() { "0".into() } else { thousands((files as f64 / secs) as u64).into() });
@@ -876,6 +1071,8 @@ fn finish_scan(st: &mut State, ui: &AppWindow, s: ScanSummary) {
     ev.files = s.files_scanned;
     ev.threats = found;
     history::append(ev);
+    // Everything the scan reports as found, the same number the app shows and History keeps.
+    count(st, Counts { scans: 1, files: s.files_scanned, threats: found, ..Counts::default() });
 
     ui.set_scanning(false);
     ui.set_paused(false);
@@ -979,6 +1176,7 @@ fn quarantine_rows(st: &mut State, ui: &AppWindow, which: &[usize]) {
             }
         }
     }
+    count(st, Counts { quarantined: moved, ..Counts::default() });
     update_results_header(st, ui);
     refresh_vault(st, ui);
     refresh_home(st, ui);
@@ -1010,6 +1208,30 @@ fn delete_row(st: &mut State, ui: &AppWindow, i: usize) {
     }
     update_results_header(st, ui);
     refresh_home(st, ui);
+}
+
+/// "Share anonymous counts" (opt-in): adds to the numbers waiting to be sent. Nothing is kept while it's off.
+fn count(st: &State, c: Counts) {
+    if st.settings.cloud_counts {
+        counts::record(c);
+    }
+}
+
+/// Sends the waiting counts about once an hour, on a background thread.
+fn tick_counts(st: &mut State) {
+    if !st.settings.cloud_counts || Instant::now() < st.next_counts_check || st.counts_busy.load(Ordering::Relaxed) {
+        return;
+    }
+    st.next_counts_check = Instant::now() + Duration::from_secs(60);
+    if !counts::due() {
+        return;
+    }
+    st.counts_busy.store(true, Ordering::Relaxed);
+    let busy = st.counts_busy.clone();
+    std::thread::spawn(move || {
+        counts::flush(Duration::from_secs(15));
+        busy.store(false, Ordering::Relaxed);
+    });
 }
 
 /// "Send to lab" (opt-in): the file goes to hexward.onurilabs.com for a person to review.
@@ -1068,8 +1290,16 @@ fn shield_hit(st: &mut State, ui: &AppWindow, ev: shields::ShieldEvent) {
         let mut e = Event::new(EventKind::Scan, ev.shield, format!("{} · {}", ev.title, ev.action));
         e.threats = 1;
         history::append(e);
+        if ev.neutralize {
+            // A ClickFix command replaced before it could be pasted.
+            count(st, Counts { threats: 1, blocked: 1, ..Counts::default() });
+        }
         refresh_home(st, ui);
-        toast(st, ui, if ev.neutralize { "alarm" } else { "warn" }, &ev.title, &ev.action);
+        if ev.shield == "Ransomware shield" {
+            toast_with(st, ui, "alarm", &ev.title, &ev.action, "Restore files", "settings");
+        } else {
+            toast(st, ui, if ev.neutralize { "alarm" } else { "warn" }, &ev.title, &ev.action);
+        }
         return;
     };
     let mut row = row_for(r, !ev.quarantined && r.is_confirmed());
@@ -1086,11 +1316,20 @@ fn shield_hit(st: &mut State, ui: &AppWindow, ev: shields::ShieldEvent) {
     e.files = 1;
     e.threats = 1;
     history::append(e);
+    // Quarantined by the shield: found and blocked (not also "quarantined", which is the person's
+    // own choice in Results). Confirmed but left in place: found.
+    if ev.quarantined || r.is_confirmed() {
+        count(st, Counts { threats: 1, blocked: ev.quarantined as u64, ..Counts::default() });
+    }
     update_results_header(st, ui);
     refresh_vault(st, ui);
     refresh_home(st, ui);
     let name = r.path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-    toast(st, ui, if ev.quarantined { "safe" } else { "alarm" }, &format!("{} found {}", ev.shield, r.detections[0].name), &format!("{name}: {}", ev.action));
+    if ev.quarantined {
+        toast(st, ui, "safe", &format!("{} found {}", ev.shield, r.detections[0].name), &format!("{name}: {}", ev.action));
+    } else {
+        toast_with(st, ui, "alarm", &format!("{} found {}", ev.shield, r.detections[0].name), &format!("{name}: {}", ev.action), "Review", "results");
+    }
 }
 
 // ---------- quarantine ----------
@@ -1413,11 +1652,13 @@ fn tick(st: &mut State, ui: &AppWindow) {
     if Instant::now() >= st.next_app_check && !ui.get_app_update_busy() {
         check_app_update(st, ui, Duration::ZERO);
     }
-    if st.toast_until.is_some_and(|t| Instant::now() > t) {
-        st.toast_until = None;
-        ui.set_toast_visible(false);
+    tick_toasts(st, ui, Duration::from_millis(100));
+    #[cfg(windows)]
+    if winnote::RAISE.swap(false, Ordering::Relaxed) {
+        show_window(ui, st);
     }
     tick_quiet(st, ui);
+    tick_counts(st);
     if let Some(list) = take(&st.restore_slot) {
         use hexward_engine::backup::Outcome;
         let ok = list.iter().filter(|r| r.outcome == Outcome::Restored).count();
@@ -1565,7 +1806,10 @@ fn main() -> Result<(), slint::PlatformError> {
         startup_checked_at: None,
         update_slot: slot(),
         vault_rows,
-        toast_until: None,
+        toasts: Rc::new(VecModel::default()),
+        toast_meta: Vec::new(),
+        toast_seq: 0,
+        toast_fresh_until: None,
         flash_until: None,
         release: None,
         app_check_slot: slot(),
@@ -1576,6 +1820,8 @@ fn main() -> Result<(), slint::PlatformError> {
         script_slot: slot(),
         sample_slot: slot(),
         restore_slot: slot(),
+        counts_busy: Arc::new(AtomicBool::new(false)),
+        next_counts_check: Instant::now() + Duration::from_secs(60),
         next_quiet_check: Instant::now(),
         quiet_paused_scan: false,
         held: Vec::new(),
@@ -1590,6 +1836,7 @@ fn main() -> Result<(), slint::PlatformError> {
     {
         let mut s = st.borrow_mut();
         ui.set_tasks(s.tasks.model());
+        ui.set_toasts(ModelRc::from(s.toasts.clone()));
         s.shields.ransom_on.store(s.settings.ransomware_shield, Ordering::Relaxed);
         shields::CLOUD_REPUTATION.store(s.settings.cloud_reputation, Ordering::Relaxed);
         shields::CLOUD_REPORTS.store(s.settings.cloud_reports, Ordering::Relaxed);
@@ -1625,6 +1872,13 @@ fn main() -> Result<(), slint::PlatformError> {
         }};
     }
 
+    on!(on_toast_dismiss, |s, _u, id: i32| { remove_toast(s, id) });
+    on!(on_toast_act, |s, _u, id: i32| { remove_toast(s, id) });
+    on!(on_toast_hover, |s, _u, id: i32, h: bool| {
+        if let Some(m) = s.toast_meta.iter_mut().find(|m| m.id == id) {
+            m.hovered = h;
+        }
+    });
     on!(on_navigate, |s, u, page: SharedString| {
         s.tasks.set_active(page == "tasks");
         match page.as_str() {
@@ -1917,6 +2171,17 @@ fn main() -> Result<(), slint::PlatformError> {
         shields::CLOUD_REPORTS.store(v, Ordering::Relaxed);
         u.set_cloud_reports(v);
     });
+    on!(on_set_cloud_counts, |s, u, v: bool| {
+        s.settings.cloud_counts = v;
+        s.settings.save();
+        if v {
+            // The results already in History count too, exactly once.
+            counts::add_history_once();
+        } else {
+            counts::clear();
+        }
+        u.set_cloud_counts(v);
+    });
     on!(on_set_cloud_samples, |s, u, v: bool| {
         s.settings.cloud_samples = v;
         s.settings.save();
@@ -2058,5 +2323,10 @@ fn main() -> Result<(), slint::PlatformError> {
     if !background {
         ui.show()?;
     }
-    slint::run_event_loop_until_quit()
+    let out = slint::run_event_loop_until_quit();
+    // Quitting: send the waiting counts (a short wait; a failure keeps them for next time).
+    if st.try_borrow().is_ok_and(|s| s.settings.cloud_counts && !s.counts_busy.load(Ordering::Relaxed)) {
+        counts::flush(Duration::from_secs(5));
+    }
+    out
 }

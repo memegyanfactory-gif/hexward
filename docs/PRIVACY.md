@@ -38,7 +38,7 @@ There is no account, no telemetry, no analytics, no advertising and no tracking.
 
 ## Cloud features (opt-in, all off by default)
 
-Three switches in Settings › Cloud. Nothing below happens until you turn the switch on.
+Four switches in Settings › Cloud. Nothing below happens until you turn the switch on.
 
 | Switch | What is sent | Where | What is kept, and for how long |
 |---|---|---|---|
@@ -46,6 +46,7 @@ Three switches in Settings › Cloud. Nothing below happens until you turn the s
 | Send detection reports | the file's name (never its folder), its SHA-256, the detection name, the Hexward version, a random install number | hexward.onurilabs.com | the report, 90 days, then deleted; only a hash of the install number |
 | (same switch) Allow on a result | the same, marked as a false alarm | hexward.onurilabs.com | 90 days; a confirmed false alarm joins the community allow list (hash and file name only) |
 | (same switch) Project audit, Check online | the name and version of a malicious package the audit found | hexward.onurilabs.com | 90 days |
+| Share anonymous counts | about once an hour, numbers only: how many scans, files checked, threats found, files quarantined and threats blocked since the last report, and the Hexward version; the first time you switch it on, the totals already in your History are included, once. No file names, hashes, folders or install number | hexward.onurilabs.com | daily totals, kept for good, for "Threats caught so far"; your address is never stored with them |
 | Send samples to the lab | the file, only when you click Send to lab on a result | hexward.onurilabs.com | encrypted until a person has reviewed it |
 
 How the reputation lookup stays private: the server answers with every known-bad and allow-listed

@@ -1,0 +1,532 @@
+<title>Hexward Pixel System</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Pixelify+Sans:wght@400;600;700&family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one 4 px pixel grid, a left rail of section codes, demos sitting on the app's own dot-grid backdrop. Dark-first like the app. */
+:root {
+  --ink: #0B0F14; --surface: #10161E; --raised: #161E28; --line: #263241; --line-strong: #3A4B60;
+  --fg: #E6EDF3; --fg-2: #A3B1C2; --fg-3: #7A8A9D;
+  --moss: #4BE07A; --moss-lo: #23A05A; --on-moss: #05210F; --oxide: #F0743A;
+  --alarm: #FF5468; --amber: #FFB547; --signal: #5AA9FF; --shadow: #020406; --dot: #1B2430;
+  --display: "Pixelify Sans", "Courier New", monospace;
+  --body: "Geist", "Segoe UI", system-ui, sans-serif;
+  --mono: "Geist Mono", ui-monospace, Consolas, monospace;
+  --px: 4px;
+  --t-tick: 80ms; --t-quick: 160ms; --t-panel: 240ms; --t-hero: 480ms;
+  --glide: cubic-bezier(.2, .8, .2, 1); --spring: cubic-bezier(.3, 1.4, .5, 1);
+  color-scheme: dark;
+}
+@media (prefers-color-scheme: light) { :root:not([data-theme="dark"]) {
+  --ink: #F3F6F2; --surface: #FFFFFF; --raised: #E8EEE9; --line: #C9D4CC; --line-strong: #9FB0A5;
+  --fg: #0B0F14; --fg-2: #3F4B57; --fg-3: #5F6B78; --moss: #1A7F45; --moss-lo: #2FB463; --on-moss: #FFFFFF;
+  --oxide: #C9531B; --alarm: #D21F3C; --amber: #A86A00; --signal: #1C64C8; --shadow: #B9C6BD; --dot: #DCE4DE; color-scheme: light; } }
+:root[data-theme="light"] {
+  --ink: #F3F6F2; --surface: #FFFFFF; --raised: #E8EEE9; --line: #C9D4CC; --line-strong: #9FB0A5;
+  --fg: #0B0F14; --fg-2: #3F4B57; --fg-3: #5F6B78; --moss: #1A7F45; --moss-lo: #2FB463; --on-moss: #FFFFFF;
+  --oxide: #C9531B; --alarm: #D21F3C; --amber: #A86A00; --signal: #1C64C8; --shadow: #B9C6BD; --dot: #DCE4DE; color-scheme: light; }
+
+* { box-sizing: border-box; }
+body { background: var(--ink); color: var(--fg); font: 400 15px/1.55 var(--body); margin: 0;
+  background-image: radial-gradient(var(--dot) 1px, transparent 1.2px); background-size: 16px 16px; }
+.wrap { max-width: 1120px; margin: 0 auto; padding-block: 40px 96px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+h1, h2, h3 { font-family: var(--display); font-weight: 600; margin: 0; text-wrap: balance; letter-spacing: .01em; }
+h2 { font-size: clamp(26px, 4vw, 34px); line-height: 1.1; }
+h3 { font-size: 19px; }
+p { margin: 0; max-width: 66ch; color: var(--fg-2); }
+code, .mono { font-family: var(--mono); font-size: 12.5px; }
+.eyebrow { font: 500 11px/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--fg-3); }
+a { color: var(--moss); }
+:focus-visible { outline: 2px solid var(--oxide); outline-offset: 3px; }
+
+/* ---- the pixel surface: stepped corners, 2 px edge, hard shadow ---- */
+.step { --edge: var(--line); --fill: var(--surface); --sh: 0px; position: relative; filter: drop-shadow(var(--sh) var(--sh) 0 var(--shadow)); }
+.step > .e { background: var(--edge); padding: 2px;
+  clip-path: polygon(4px 0, calc(100% - 4px) 0, calc(100% - 4px) 2px, calc(100% - 2px) 2px, calc(100% - 2px) 4px, 100% 4px, 100% calc(100% - 4px), calc(100% - 2px) calc(100% - 4px), calc(100% - 2px) calc(100% - 2px), calc(100% - 4px) calc(100% - 2px), calc(100% - 4px) 100%, 4px 100%, 4px calc(100% - 2px), 2px calc(100% - 2px), 2px calc(100% - 4px), 0 calc(100% - 4px), 0 4px, 2px 4px, 2px 2px, 4px 2px); }
+.step > .e > .f { background: var(--fill); height: 100%;
+  clip-path: polygon(2px 0, calc(100% - 2px) 0, calc(100% - 2px) 2px, 100% 2px, 100% calc(100% - 2px), calc(100% - 2px) calc(100% - 2px), calc(100% - 2px) 100%, 2px 100%, 2px calc(100% - 2px), 0 calc(100% - 2px), 0 2px, 2px 2px);
+  box-shadow: inset 0 2px 0 rgba(255,255,255,.04); }
+.raised { --sh: 4px; }
+
+/* ---- header ---- */
+.top { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 32px; align-items: center; }
+.top h1 { font-size: clamp(40px, 7vw, 76px); line-height: .95; }
+.top h1 em { font-style: normal; color: var(--moss); }
+.lede { font-size: 17px; margin-top: 18px; }
+#hero { width: 220px; height: 220px; image-rendering: pixelated; max-width: 100%; }
+.legend { display: flex; gap: 18px; flex-wrap: wrap; margin-top: 22px; }
+.legend span { display: inline-flex; align-items: center; gap: 8px; font: 12px var(--mono); color: var(--fg-3); }
+.legend i { width: 10px; height: 10px; display: inline-block; }
+
+/* ---- sections ---- */
+section { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 24px; margin-top: 88px; }
+.code { font: 600 13px var(--mono); color: var(--oxide); padding-top: 8px; }
+.code b { display: block; font-weight: 400; color: var(--fg-3); margin-top: 6px; }
+.sec-body { display: grid; gap: 22px; min-width: 0; }
+.grid2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
+.grid3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; }
+.card-in { padding: 20px; display: grid; gap: 10px; }
+.rule { display: grid; gap: 8px; padding: 20px; }
+.rule .n { font: 600 28px var(--display); color: var(--moss); line-height: 1; }
+
+/* swatches */
+.sw { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 14px; }
+.sw div { display: grid; gap: 6px; }
+.sw .c { height: 64px; border: 2px solid var(--line); }
+.sw b { font: 600 13px var(--body); }
+.sw small { font: 11.5px var(--mono); color: var(--fg-3); }
+
+/* type */
+.type-row { display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 16px; align-items: baseline; padding: 14px 0; border-bottom: 2px dashed var(--line); }
+.type-row:last-child { border-bottom: 0; }
+
+/* tables */
+.tbl-wrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: 14px; }
+th, td { text-align: left; padding: 10px 12px; border-bottom: 2px solid var(--line); vertical-align: top; }
+th { font: 500 11px var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--fg-3); }
+td code { color: var(--moss); }
+
+/* ---- controls (as in the app) ---- */
+.btn { --b: var(--moss); font: 600 14px var(--body); color: var(--on-moss); background: var(--b); border: 0; padding: 10px 18px; cursor: pointer;
+  box-shadow: 4px 4px 0 var(--shadow), inset 0 -3px 0 rgba(0,0,0,.22); transition: transform var(--t-tick) steps(2), box-shadow var(--t-tick) steps(2); }
+.btn:hover { filter: brightness(1.08); }
+.btn:active, .btn.pressed { transform: translate(4px, 4px); box-shadow: 0 0 0 var(--shadow), inset 0 3px 0 rgba(0,0,0,.22); }
+.btn.ghost { background: transparent; color: var(--fg); box-shadow: inset 0 0 0 2px var(--line-strong), 4px 4px 0 var(--shadow); }
+.btn.ghost:active { box-shadow: inset 0 0 0 2px var(--line-strong); }
+.btn.small { padding: 6px 12px; font-size: 12.5px; }
+.play { font: 500 11px var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--fg-2); background: var(--raised); border: 2px solid var(--line-strong); padding: 6px 10px; cursor: pointer; }
+.play:hover { color: var(--moss); border-color: var(--moss); }
+
+/* motion demo tiles */
+.demo { display: grid; gap: 12px; padding: 18px; }
+.demo-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+.stage { height: 150px; background: var(--ink); border: 2px solid var(--line); position: relative; overflow: hidden; display: grid; place-items: center;
+  background-image: radial-gradient(var(--dot) 1px, transparent 1.2px); background-size: 12px 12px; }
+.spec { font: 12px var(--mono); color: var(--fg-3); }
+.spec b { color: var(--fg-2); font-weight: 500; }
+
+/* stagger */
+.stg { display: grid; grid-template-columns: repeat(3, 56px); gap: 10px; }
+.stg i { height: 56px; background: var(--raised); border: 2px solid var(--line-strong); box-shadow: 3px 3px 0 var(--shadow); }
+.stg.go i { animation: enter var(--t-panel) var(--glide) both; }
+.stg.go i:nth-child(2) { animation-delay: 40ms; } .stg.go i:nth-child(3) { animation-delay: 80ms; }
+.stg.go i:nth-child(4) { animation-delay: 120ms; } .stg.go i:nth-child(5) { animation-delay: 160ms; } .stg.go i:nth-child(6) { animation-delay: 200ms; }
+@keyframes enter { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
+
+/* lift */
+.lift { width: 160px; padding: 14px; background: var(--surface); border: 2px solid var(--line); box-shadow: 0 0 0 var(--shadow);
+  transition: transform var(--t-quick) var(--glide), box-shadow var(--t-quick) var(--glide), border-color var(--t-quick); font-size: 13px; color: var(--fg-2); cursor: pointer; }
+.lift:hover, .lift.on { transform: translate(-2px, -2px); box-shadow: 6px 6px 0 var(--shadow); border-color: var(--moss); }
+
+/* switch */
+.sw2 { width: 52px; height: 28px; background: var(--raised); border: 2px solid var(--line-strong); position: relative; cursor: pointer; padding: 0; }
+.sw2::after { content: ""; position: absolute; top: 4px; left: 4px; width: 16px; height: 16px; background: var(--fg-3); transition: left var(--t-quick) steps(4), background var(--t-quick); }
+.sw2[aria-checked="true"] { border-color: var(--moss); background: color-mix(in srgb, var(--moss) 18%, var(--raised)); }
+.sw2[aria-checked="true"]::after { left: 28px; background: var(--moss); }
+
+/* blocks progress */
+.blocks { display: grid; grid-template-columns: repeat(20, 1fr); gap: 4px; width: 88%; }
+.blocks i { height: 18px; background: var(--raised); }
+.blocks i.on { background: var(--moss); }
+.blocks i.half { background: color-mix(in srgb, var(--moss) 45%, var(--raised)); }
+
+/* toast */
+.toasts { position: absolute; right: 12px; bottom: 12px; display: grid; gap: 8px; justify-items: end; width: min(330px, calc(100% - 24px)); }
+.toast { --tone: var(--moss); width: 100%; background: var(--surface); border: 2px solid color-mix(in srgb, var(--tone) 70%, transparent); box-shadow: 4px 4px 0 var(--shadow);
+  display: grid; grid-template-columns: 6px 28px minmax(0, 1fr); gap: 10px; padding: 10px 12px 12px 0; position: relative; text-align: left;
+  animation: toast-in var(--t-panel) var(--spring) both; }
+.toast::before { content: ""; background: var(--tone); }
+.toast.out { animation: toast-out var(--t-quick) ease-in both; }
+.toast.alarm { --tone: var(--alarm); animation: toast-in var(--t-panel) var(--spring) both, shake 320ms steps(6) var(--t-panel) 1; }
+.toast.warn { --tone: var(--amber); }
+.toast.scan { --tone: var(--signal); }
+.toast b { font: 600 13px var(--body); color: var(--fg); display: block; }
+.toast span { font-size: 12px; color: var(--fg-2); line-height: 1.4; display: block; }
+.toast .ic { width: 28px; height: 28px; image-rendering: pixelated; }
+.toast .cd { position: absolute; left: 6px; right: 0; bottom: 0; display: grid; grid-template-columns: repeat(12, 1fr); gap: 2px; padding: 0 0 0 2px; }
+.toast .cd i { height: 3px; background: var(--tone); opacity: .8; }
+.toast .act { display: flex; gap: 8px; margin-top: 8px; }
+@keyframes toast-in { from { opacity: 0; transform: translateX(48px); } to { opacity: 1; transform: none; } }
+@keyframes toast-out { to { opacity: 0; transform: translateX(32px); } }
+@keyframes shake { 0%, 100% { translate: 0; } 16% { translate: -4px; } 33% { translate: 4px; } 50% { translate: -2px; } 66% { translate: 2px; } }
+
+/* number tick */
+.tick { font: 600 46px var(--display); color: var(--fg); font-variant-numeric: tabular-nums; }
+
+/* windows toast mock */
+.win { width: min(364px, 100%); background: #2B2B2B; color: #fff; border-radius: 8px; padding: 14px 16px 16px; font: 13px "Segoe UI", var(--body); box-shadow: 0 8px 24px rgba(0,0,0,.35); display: grid; gap: 10px; }
+.win .hd { display: flex; align-items: center; gap: 8px; font-size: 12px; color: #cfcfcf; }
+.win .hd canvas { width: 16px; height: 16px; image-rendering: pixelated; }
+.win .bd { display: grid; grid-template-columns: 48px minmax(0, 1fr); gap: 12px; }
+.win .bd canvas { width: 48px; height: 48px; image-rendering: pixelated; }
+.win b { font-weight: 600; display: block; margin-bottom: 2px; }
+.win .bt { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.win .bt span { background: #3d3d3d; border-radius: 4px; text-align: center; padding: 7px; font-size: 13px; }
+.win .bt span:first-child { background: #4cc2ff; color: #000; }
+
+/* icons */
+.icons { display: grid; grid-template-columns: repeat(auto-fill, minmax(88px, 1fr)); gap: 12px; }
+.icons figure { margin: 0; display: grid; gap: 8px; justify-items: center; padding: 14px 6px; border: 2px solid var(--line); background: var(--surface); }
+.icons canvas { width: 36px; height: 36px; image-rendering: pixelated; }
+.icons figcaption { font: 11px var(--mono); color: var(--fg-3); }
+
+.do-dont { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
+.do-dont ul { margin: 8px 0 0; padding-left: 18px; color: var(--fg-2); display: grid; gap: 6px; font-size: 14px; }
+.tag { font: 600 11px var(--mono); letter-spacing: .1em; }
+.tag.y { color: var(--moss); } .tag.n { color: var(--alarm); }
+
+@media (max-width: 820px) {
+  .top { grid-template-columns: 1fr; }
+  #hero { width: 160px; height: 160px; }
+  section { grid-template-columns: 1fr; gap: 12px; margin-top: 64px; }
+  .grid2, .grid3, .do-dont { grid-template-columns: 1fr; }
+  .type-row { grid-template-columns: 1fr; gap: 4px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 1ms !important; animation-iteration-count: 1 !important; transition-duration: 1ms !important; }
+}
+</style>
+
+<div class="wrap">
+  <header class="top">
+    <div>
+      <p class="eyebrow">Hexward · design guideline · v2</p>
+      <h1>The <em>pixel</em> system</h1>
+      <p class="lede">How Hexward looks, moves and speaks. Everything sits on a 4 px grid, every edge is hard, and every motion tells you something about your PC's safety. Built for the Slint desktop app; the website and Windows notifications follow the same rules.</p>
+      <div class="legend">
+        <span><i style="background:var(--moss)"></i>Safe</span>
+        <span><i style="background:var(--signal)"></i>Scanning</span>
+        <span><i style="background:var(--amber)"></i>Needs a look</span>
+        <span><i style="background:var(--alarm)"></i>Threat</span>
+        <span><i style="background:var(--oxide)"></i>Brand core</span>
+      </div>
+    </div>
+    <canvas id="hero" width="220" height="220" aria-label="The Hexward shield assembling pixel by pixel, then sending out scan rings"></canvas>
+  </header>
+
+  <section>
+    <div class="code">P-01<b>Principles</b></div>
+    <div class="sec-body">
+      <h2>Four rules everything follows</h2>
+      <div class="grid2">
+        <div class="step"><div class="e"><div class="f rule"><span class="n">4px</span><h3>One pixel, one grid</h3><p>Sizes, gaps and offsets are multiples of 4 px. Borders are 2 px (half a pixel). Nothing is blurred, rounded or anti-aliased on purpose.</p></div></div></div>
+        <div class="step"><div class="e"><div class="f rule"><span class="n">0 blur</span><h3>Depth from hard shadows</h3><p>Raised things cast a solid 4 px shadow down and right. Pressing a button pushes it into its shadow. Glass, glow and gradients are not part of Hexward.</p></div></div></div>
+        <div class="step"><div class="e"><div class="f rule"><span class="n">2 cues</span><h3>State is colour and shape</h3><p>Every status has a colour and a second cue: a chip word, a stripe, a blinking core, a shake. People who can't tell red from green still read it.</p></div></div></div>
+        <div class="step"><div class="e"><div class="f rule"><span class="n">≤ 480ms</span><h3>Motion means something</h3><p>Things move to show cause and effect: a scan sweeps, a threat shakes, a fixed item settles. Nothing loops just to decorate, and everything stops with reduced motion.</p></div></div></div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="code">C-02<b>Colour</b></div>
+    <div class="sec-body">
+      <h2>Ink, Moss and Oxide</h2>
+      <p>Ink is the night sky the shields watch over. Moss means protected. Oxide is the brand's warm core and never means danger; danger has its own red.</p>
+      <div class="sw" id="swatches"></div>
+      <p class="spec">Switch this page between light and dark to see both palettes. The app uses the same tokens (<code>Theme.*</code> in app.slint).</p>
+    </div>
+  </section>
+
+  <section>
+    <div class="code">T-03<b>Type</b></div>
+    <div class="sec-body">
+      <h2>Three faces, three jobs</h2>
+      <div class="step"><div class="e"><div class="f card-in">
+        <div class="type-row"><span class="eyebrow">Display 32</span><span style="font:600 32px/1.1 var(--display)">No threats waiting</span></div>
+        <div class="type-row"><span class="eyebrow">Number 26</span><span style="font:600 26px var(--display);font-variant-numeric:tabular-nums">43,743 files</span></div>
+        <div class="type-row"><span class="eyebrow">Title 15 · 600</span><span style="font:600 15px var(--body)">Ransomware shield</span></div>
+        <div class="type-row"><span class="eyebrow">Body 14</span><span style="font:400 14px/1.5 var(--body);color:var(--fg-2)">Keeps hidden decoy files in your folders and watches for files being renamed or encrypted in bulk.</span></div>
+        <div class="type-row"><span class="eyebrow">Label 11 · caps</span><span class="eyebrow" style="color:var(--fg-2)">Checked today</span></div>
+        <div class="type-row"><span class="eyebrow">Data 12 mono</span><span class="mono" style="color:var(--fg-2)">C:\Users\sam\Downloads\invoice.pdf.exe</span></div>
+      </div></div></div>
+      <p>Pixelify Sans is for headlines and big numbers only, never for sentences. Geist carries everything people read. Geist Mono is for paths, hashes, counts and small capital labels.</p>
+    </div>
+  </section>
+
+  <section>
+    <div class="code">S-04<b>Surfaces</b></div>
+    <div class="sec-body">
+      <h2>The stepped panel</h2>
+      <p>Every panel has stepped corners (two 2 px steps), a 2 px edge and a faint 2 px highlight along the top. Only the thing you can act on, or the thing that matters most on a screen, is raised with a shadow.</p>
+      <div class="grid3">
+        <div class="step"><div class="e"><div class="f card-in"><span class="eyebrow">Flat</span><p>Lists, settings rows, stats. Most of the app.</p></div></div></div>
+        <div class="step raised" style="--edge:var(--line-strong)"><div class="e"><div class="f card-in"><span class="eyebrow">Raised</span><p>The hero status, dialogs, toasts, a selected scan type.</p></div></div></div>
+        <div class="step raised" style="--edge:var(--alarm)"><div class="e"><div class="f card-in"><span class="eyebrow" style="color:var(--alarm)">Raised · threat</span><p>The edge takes the status colour. The fill never does.</p></div></div></div>
+      </div>
+      <p>The window background is Ink with a 2 px dot every 16 px: the grid the shields keep watch on. Empty states use the same dots, denser.</p>
+    </div>
+  </section>
+
+  <section>
+    <div class="code">I-05<b>Icons</b></div>
+    <div class="sec-body">
+      <h2>12 × 12 pixel icons</h2>
+      <p>Drawn by hand on a 12 × 12 grid with a 1 pixel stroke, shown at 18, 24 or 36 px (whole multiples only, so pixels stay square). Icons take the text colour, or Moss when their item is active.</p>
+      <div class="icons" id="icons"></div>
+    </div>
+  </section>
+
+  <section>
+    <div class="code">M-06<b>Motion</b></div>
+    <div class="sec-body">
+      <h2>Motion tokens</h2>
+      <div class="tbl-wrap"><table>
+        <thead><tr><th>Token</th><th>Time</th><th>Curve</th><th>Used for</th></tr></thead>
+        <tbody>
+          <tr><td><code>tick</code></td><td>80 ms</td><td>2 steps</td><td>Button press, check marks, hover colour</td></tr>
+          <tr><td><code>quick</code></td><td>160 ms</td><td>glide or 4 steps</td><td>Switches, card lift, toast leaving, nav marker</td></tr>
+          <tr><td><code>panel</code></td><td>240 ms</td><td>glide, 40 ms stagger</td><td>Screens and cards arriving, toasts arriving (spring)</td></tr>
+          <tr><td><code>hero</code></td><td>480 ms</td><td>glide</td><td>Shield assembling, a scan finishing, big state changes</td></tr>
+          <tr><td><code>frame</code></td><td>50 ms</td><td>whole frames</td><td>Pixel loops: scan sweep, spinner, core blink, block fill</td></tr>
+        </tbody>
+      </table></div>
+      <p class="spec"><b>glide</b> cubic-bezier(.2, .8, .2, 1) · <b>spring</b> cubic-bezier(.3, 1.4, .5, 1), toasts only · <b>steps</b> pixel moves jump whole pixels instead of sliding</p>
+
+      <div class="grid2">
+        <div class="step"><div class="e"><div class="f demo">
+          <div class="demo-head"><h3>Screen arrives</h3><button class="play" data-play="stagger">Play</button></div>
+          <div class="stage"><div class="stg go" id="stg"><i></i><i></i><i></i><i></i><i></i><i></i></div></div>
+          <p class="spec"><b>panel</b> · each card rises 12 px and fades in, 40 ms after the one before. Only on arrival, never on refresh.</p>
+        </div></div></div>
+        <div class="step"><div class="e"><div class="f demo">
+          <div class="demo-head"><h3>Press into the shadow</h3><button class="play" data-play="press">Play</button></div>
+          <div class="stage"><div style="display:flex;gap:18px"><button class="btn" id="pressbtn">Quick scan</button><button class="btn ghost">More scans</button></div></div>
+          <p class="spec"><b>tick</b> · the button drops 4 px into its own shadow and the shadow disappears. Try clicking.</p>
+        </div></div></div>
+        <div class="step"><div class="e"><div class="f demo">
+          <div class="demo-head"><h3>Card lift</h3><button class="play" data-play="lift">Play</button></div>
+          <div class="stage"><div class="lift" id="lift"><b style="color:var(--fg);font:600 15px var(--display)">Full scan</b><br>Every file on every drive.</div></div>
+          <p class="spec"><b>quick</b> · on hover a clickable card rises 2 px, its shadow grows to 6 px and its edge turns Moss.</p>
+        </div></div></div>
+        <div class="step"><div class="e"><div class="f demo">
+          <div class="demo-head"><h3>Switch</h3><button class="play" data-play="switch">Play</button></div>
+          <div class="stage"><button class="sw2" id="sw" role="switch" aria-checked="false" aria-label="Ransomware shield"></button></div>
+          <p class="spec"><b>quick, 4 steps</b> · the knob jumps across in whole pixels; the track fills Moss.</p>
+        </div></div></div>
+        <div class="step"><div class="e"><div class="f demo">
+          <div class="demo-head"><h3>Scan progress</h3><button class="play" data-play="blocks">Play</button></div>
+          <div class="stage"><div class="blocks" id="blocks"></div></div>
+          <p class="spec"><b>frame</b> · 20 whole blocks. The next block blinks while it fills. Before the total is known, a blue comet sweeps instead.</p>
+        </div></div></div>
+        <div class="step"><div class="e"><div class="f demo">
+          <div class="demo-head"><h3>Counting up</h3><button class="play" data-play="tick">Play</button></div>
+          <div class="stage"><span class="tick" id="tick">0</span></div>
+          <p class="spec"><b>hero</b> · numbers that change count to their new value over 480 ms, then rest. Shown once per change.</p>
+        </div></div></div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="code">N-07<b>Notifications</b></div>
+    <div class="sec-body">
+      <h2>Toasts that say what happened</h2>
+      <p>A toast names what Hexward did and what you can do next. The stripe and edge carry the status; the countdown blocks drain while it waits; a threat shakes once and stays until you act.</p>
+      <div class="step"><div class="e"><div class="f demo">
+        <div class="demo-head"><h3>In the app</h3>
+          <span style="display:flex;gap:8px;flex-wrap:wrap">
+            <button class="play" data-toast="safe">Safe</button><button class="play" data-toast="scan">Info</button>
+            <button class="play" data-toast="warn">Warning</button><button class="play" data-toast="alarm">Threat</button>
+          </span></div>
+        <div class="stage" style="height:330px;place-items:start"><div class="toasts" id="toasts"></div></div>
+      </div></div></div>
+      <div class="tbl-wrap"><table>
+        <thead><tr><th>Status</th><th>Stays</th><th>Motion</th><th>Windows notification</th></tr></thead>
+        <tbody>
+          <tr><td style="color:var(--moss)">Safe</td><td>5 s</td><td>springs in, drains, slides out</td><td>Only when the window is hidden</td></tr>
+          <tr><td style="color:var(--signal)">Info</td><td>5 s</td><td>same</td><td>Only when hidden; held during games and presentations</td></tr>
+          <tr><td style="color:var(--amber)">Needs a look</td><td>8 s</td><td>same, plus a "Review" button</td><td>When hidden; held in quiet mode</td></tr>
+          <tr><td style="color:var(--alarm)">Threat</td><td>until acted on</td><td>springs in, shakes once, no countdown</td><td>Always, even in quiet mode; stays on screen with buttons</td></tr>
+        </tbody>
+      </table></div>
+      <ul style="margin:0;padding-left:18px;color:var(--fg-2);display:grid;gap:6px;font-size:14px">
+        <li>At most three toasts at once, newest at the bottom. A fourth pushes the oldest out.</li>
+        <li>Toasts grow to fit their text. Nothing is cut off; long paths are shortened in the middle.</li>
+        <li>Hovering a toast pauses its countdown.</li>
+      </ul>
+
+      <div class="grid2" style="align-items:start">
+        <div style="display:grid;gap:10px">
+          <h3>In Windows</h3>
+          <div class="win" aria-label="Example Windows notification from Hexward">
+            <div class="hd"><canvas width="16" height="16" data-mark="safe"></canvas>Hexward<span style="margin-left:auto">now</span></div>
+            <div class="bd"><canvas width="48" height="48" data-mark="alarm"></canvas><div><b>Trojan quarantined</b>invoice.pdf.exe in Downloads was a disguised program. Hexward moved it to quarantine before it ran.</div></div>
+            <div class="bt"><span>Open Hexward</span><span>Undo</span></div>
+          </div>
+        </div>
+        <div style="display:grid;gap:10px">
+          <h3>Rules for Windows notifications</h3>
+          <ul style="margin:0;padding-left:18px;color:var(--fg-2);display:grid;gap:6px;font-size:14px">
+            <li>They come from <b>Hexward</b> with the pixel shield, never from "Windows PowerShell".</li>
+            <li>The large icon is the shield with its core in the status colour: red for a threat, Moss when it's handled.</li>
+            <li>Threats use the "reminder" style: they stay until dismissed and offer <b>Open Hexward</b>.</li>
+            <li>Clicking a notification brings Hexward to the front on the right screen.</li>
+            <li>Quiet mode holds everything except threats, then sends one summary.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="code">X-08<b>Do / don't</b></div>
+    <div class="sec-body">
+      <div class="do-dont">
+        <div class="step"><div class="e"><div class="f card-in"><span class="tag y">DO</span><ul>
+          <li>Snap every size to the 4 px grid.</li><li>Say what happened in plain words: "Moved to quarantine".</li>
+          <li>Animate cause and effect: scan, find, settle.</li><li>Give every status a word as well as a colour.</li></ul></div></div></div>
+        <div class="step"><div class="e"><div class="f card-in"><span class="tag n">DON'T</span><ul>
+          <li>Round corners, blur shadows or add gradients.</li><li>Use Oxide or red for anything that isn't the brand core or a threat.</li>
+          <li>Loop an animation that carries no information.</li><li>Cut text off inside a toast or a card.</li></ul></div></div></div>
+      </div>
+    </div>
+  </section>
+</div>
+
+<script>
+(() => {
+  const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+  const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const MARK = [".##############.","################","################","######....######","#####......#####","####...oo...####","####...oo...####","#####......#####","######....######",".##############.",".##############.","..############..","...##########...","....########....",".....######.....","......####......"];
+  const TONES = { safe: "--moss", scan: "--signal", warn: "--amber", alarm: "--alarm", brand: "--oxide" };
+
+  function drawMark(ctx, size, x0, y0, core, k = 1) {
+    const u = size / 16;
+    MARK.forEach((row, y) => [...row].forEach((c, x) => {
+      if (c === ".") return;
+      const t = Math.min(1, Math.max(0, (k * 1.6 - y * 0.05 - ((x * 7 + y * 3) % 5) * 0.03) / 0.3));
+      if (t <= 0) return;
+      ctx.globalAlpha = t;
+      ctx.fillStyle = c === "o" ? core : (x < 8 ? css("--moss") : css("--moss-lo"));
+      ctx.fillRect(Math.round(x0 + x * u), Math.round(y0 + y * u - (1 - t) * u * 4), Math.ceil(u), Math.ceil(u));
+    }));
+    ctx.globalAlpha = 1;
+  }
+
+  // small marks (Windows mock, toast icons)
+  function paintMarks() {
+    document.querySelectorAll("canvas[data-mark]").forEach(c => {
+      const ctx = c.getContext("2d"); ctx.clearRect(0, 0, c.width, c.height);
+      drawMark(ctx, c.width, 0, 0, css(TONES[c.dataset.mark] || "--oxide"));
+    });
+  }
+
+  // hero: shield assembles, then scan rings leave it
+  const hero = document.getElementById("hero"), hx = hero.getContext("2d");
+  let t0 = performance.now();
+  function heroFrame(now) {
+    const W = hero.width, t = now - t0;
+    hx.clearRect(0, 0, W, W);
+    const ringEvery = 1800, maxR = W * 0.7;
+    if (!reduce) for (let k = 0; k < 3; k++) {
+      const r = ((t + k * ringEvery / 3) % ringEvery) / ringEvery * maxR;
+      hx.fillStyle = css("--moss");
+      for (let a = 0; a < 64; a++) {
+        const ang = a / 64 * Math.PI * 2, x = W / 2 + Math.cos(ang) * r, y = W / 2 + Math.sin(ang) * r;
+        hx.globalAlpha = Math.max(0, 0.55 * (1 - r / maxR));
+        hx.fillRect(Math.round(x / 4) * 4, Math.round(y / 4) * 4, 3, 3);
+      }
+    }
+    hx.globalAlpha = 1;
+    const build = reduce ? 1 : Math.min(1, t / 900);
+    const blink = reduce || Math.floor(t / 300) % 4 !== 3;
+    drawMark(hx, 128, (W - 128) / 2, (W - 128) / 2, blink ? css("--oxide") : css("--line-strong"), build);
+    requestAnimationFrame(heroFrame);
+  }
+  requestAnimationFrame(heroFrame);
+
+  // swatches
+  const SW = [["--ink", "Ink", "Window background"], ["--surface", "Surface", "Panels"], ["--raised", "Raised", "Hover, selected, tracks"], ["--line", "Line", "2 px edges"],
+    ["--fg", "Text", "Headlines, titles"], ["--fg-2", "Text 2", "Body copy"], ["--moss", "Moss", "Protected, primary action"], ["--oxide", "Oxide", "Brand core only"],
+    ["--signal", "Signal", "Scanning, info"], ["--amber", "Amber", "Needs a look"], ["--alarm", "Alarm", "Threat, delete"], ["--shadow", "Shadow", "Hard 4 px shadow"]];
+  function swatches() {
+    document.getElementById("swatches").innerHTML = SW.map(([v, n, use]) => `<div><span class="c" style="background:var(${v})"></span><b>${n}</b><small>${css(v).toUpperCase()} · ${use}</small></div>`).join("");
+  }
+
+  // icons
+  const ICONS = {
+    shield: [".##########.","#..........#","#..........#","#.......#..#","#......#...#",".#.#..#...#.",".#..##....#.","..#......#..","...#....#...","....#..#....",".....##.....","............"],
+    scan: ["..####......",".#....#.....","#......#....","#......#....","#......#....","#......#....",".#....#.....","..####.#....","........#...",".........#..","..........#.","...........#"],
+    bug: ["..#......#..","...#....#...","....####....","#..######..#",".#.#.##.#.#.","..########..","##.#.##.#.##","..########..",".#.#.##.#.#.","#..######..#","....####....","............"],
+    vault: ["############","#..........#","############",".#........#.",".#..####..#.",".#........#.",".#........#.",".#........#.",".#........#.",".#........#.",".##########.","............"],
+    bolt: ["......###...",".....###....","....###.....","...###......","..#######...",".....###....","....###.....","...###......","..###.......",".##.........","#...........","............"],
+    lock: ["....####....","...#....#...","..#......#..","..#......#..",".##########.",".#........#.",".#...##...#.",".#...##...#.",".#....#...#.",".#........#.",".##########.","............"],
+    terminal: ["............","############","#..........#","#.#........#","#..#.......#","#...#......#","#..#.......#","#.#...####.#","#..........#","############","............","............"],
+    sparkle: ["...#........","...#........",".#####......","...#........","...#....#...","........#...","......#####.","........#...","..#.....#...",".###........","..#.........","............"]
+  };
+  function icons() {
+    const box = document.getElementById("icons");
+    box.innerHTML = Object.keys(ICONS).map(k => `<figure><canvas width="12" height="12" data-icon="${k}"></canvas><figcaption>${k}</figcaption></figure>`).join("");
+    box.querySelectorAll("canvas").forEach(c => {
+      const ctx = c.getContext("2d"); ctx.fillStyle = css("--fg-2");
+      ICONS[c.dataset.icon].forEach((r, y) => [...r].forEach((ch, x) => { if (ch === "#") ctx.fillRect(x, y, 1, 1); }));
+    });
+  }
+
+  // demos
+  const blocks = document.getElementById("blocks");
+  blocks.innerHTML = "<i></i>".repeat(20);
+  let blockTimer;
+  function runBlocks() {
+    clearInterval(blockTimer); let v = 0;
+    blockTimer = setInterval(() => {
+      v += 0.35; const n = Math.floor(v);
+      [...blocks.children].forEach((b, i) => { b.className = i < n ? "on" : i === n && Math.floor(v * 4) % 2 ? "half" : ""; });
+      if (n >= 20) clearInterval(blockTimer);
+    }, 50);
+  }
+  function runTick() {
+    const el = document.getElementById("tick"), to = 43743, start = performance.now();
+    (function f(now) { const k = Math.min(1, (now - start) / 480), e = 1 - Math.pow(1 - k, 3);
+      el.textContent = Math.round(to * e).toLocaleString("en-US"); if (k < 1) requestAnimationFrame(f); })(start);
+  }
+  const plays = {
+    stagger() { const s = document.getElementById("stg"); s.classList.remove("go"); void s.offsetWidth; s.classList.add("go"); },
+    press() { const b = document.getElementById("pressbtn"); b.classList.add("pressed"); setTimeout(() => b.classList.remove("pressed"), 220); },
+    lift() { const l = document.getElementById("lift"); l.classList.add("on"); setTimeout(() => l.classList.remove("on"), 900); },
+    switch() { const s = document.getElementById("sw"); s.setAttribute("aria-checked", String(s.getAttribute("aria-checked") !== "true")); },
+    blocks: runBlocks, tick: runTick
+  };
+  document.querySelectorAll("[data-play]").forEach(b => b.addEventListener("click", () => plays[b.dataset.play]()));
+  document.getElementById("sw").addEventListener("click", plays.switch);
+
+  // toasts
+  const MSG = {
+    safe: ["Scan finished", "43,743 files checked. Nothing found."],
+    scan: ["Rules updated", "5,134 rules and 9,812 known-bad hashes are ready."],
+    warn: ["Suspicious file left in place", "holiday-photo.jpg is really a Windows program. Open Hexward to decide."],
+    alarm: ["Ransomware activity stopped", "A decoy file in Documents was encrypted by locker.exe. Hexward stopped it. Restore your files from Settings › Document backup."]
+  };
+  const STAY = { safe: 5000, scan: 5000, warn: 8000, alarm: 0 };
+  const stack = document.getElementById("toasts");
+  function toast(kind) {
+    const [title, text] = MSG[kind];
+    const el = document.createElement("div");
+    el.className = "toast " + kind; el.setAttribute("role", kind === "alarm" ? "alert" : "status");
+    el.innerHTML = `<canvas class="ic" width="28" height="28" data-mark="${kind}"></canvas><div><b>${title}</b><span>${text}</span>${kind === "alarm" || kind === "warn" ? `<div class="act"><button class="btn small">${kind === "alarm" ? "Restore files" : "Review"}</button><button class="btn small ghost" data-x>Dismiss</button></div>` : ""}</div>${STAY[kind] ? '<div class="cd">' + "<i></i>".repeat(12) + "</div>" : ""}`;
+    stack.appendChild(el);
+    paintMarks();
+    while (stack.children.length > 3) stack.firstChild.remove();
+    const close = () => { el.classList.add("out"); setTimeout(() => el.remove(), 170); };
+    el.querySelector("[data-x]")?.addEventListener("click", close);
+    if (STAY[kind]) {
+      const bars = [...el.querySelectorAll(".cd i")]; let left = STAY[kind], hover = false;
+      el.addEventListener("mouseenter", () => hover = true); el.addEventListener("mouseleave", () => hover = false);
+      const iv = setInterval(() => { if (hover) return; left -= 100;
+        bars.forEach((b, i) => b.style.opacity = i < Math.ceil(left / STAY[kind] * 12) ? .8 : .12);
+        if (left <= 0) { clearInterval(iv); close(); } }, 100);
+    }
+  }
+  document.querySelectorAll("[data-toast]").forEach(b => b.addEventListener("click", () => toast(b.dataset.toast)));
+
+  function paintAll() { swatches(); icons(); paintMarks(); }
+  paintAll();
+  matchMedia("(prefers-color-scheme: dark)").addEventListener("change", paintAll);
+  new MutationObserver(paintAll).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+  // start in a working state: one toast of each kind is visible
+  toast("safe"); toast("warn"); toast("alarm"); runBlocks(); runTick();
+})();
+</script>

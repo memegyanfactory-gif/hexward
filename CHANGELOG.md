@@ -2,6 +2,14 @@
 
 Each `## version` section becomes the release notes and the first line shows in the app's update banner.
 
+## 0.5.2
+
+- New look, built on the pixel design system ([docs/design.html](docs/design.html)): stepped pixel panels with hard shadows, a dot-grid backdrop, buttons that press into their shadow
+- Denser dashboard: six live numbers, every shield at a glance, the threat map, recent activity and shortcuts
+- Compact scan view: a small HUD with scan rings, live bytes, the progress map and a throughput graph
+- Notifications: up to three toasts that fit their text, with countdowns and a Review or Restore button; threats shake once and stay until handled. Windows notifications now come from Hexward with its pixel shield, keep threats on screen and open the app when clicked
+- Share anonymous counts (Settings › Cloud, off until you turn it on): about once an hour Hexward sends only how many scans, files, threats found, quarantined and blocked, for "Threats caught so far" on hexward.onurilabs.com, including the results already in your History, once. No file names, hashes or folders
+
 ## 0.5.1
 
 - Compressed RAR files are now unpacked and scanned (RAR 5, WinRAR's format since 2013), with Hexward's own decoder

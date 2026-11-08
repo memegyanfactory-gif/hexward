@@ -182,10 +182,12 @@ fn sample(ui: &AppWindow) {
     ui.set_home_text(s("Last scan today 09:12: 43,743 files checked, nothing found. The shields check new downloads and every program that starts."));
     ui.set_shield_info(s("Watches Downloads, Desktop, Startup. New and changed files are checked as soon as they finish writing."));
     ui.set_home_stats(m(vec![
-        StatItem { label: s("CHECKED TODAY"), value: s("43,743") },
-        StatItem { label: s("FOUND · 30 DAYS"), value: s("2") },
-        StatItem { label: s("RULES"), value: s("5,134") },
-        StatItem { label: s("RULES UPDATED"), value: s("today 07:58") },
+        StatItem { label: s("CHECKED TODAY"), value: s("43,743"), sub: s("files"), tone: s("") },
+        StatItem { label: s("FOUND · 30D"), value: s("2"), sub: s("threats"), tone: s("alarm") },
+        StatItem { label: s("QUARANTINED"), value: s("2"), sub: s("locked away"), tone: s("") },
+        StatItem { label: s("SHIELDS"), value: s("6/6"), sub: s("on"), tone: s("safe") },
+        StatItem { label: s("RULES"), value: s("5,134"), sub: s("updated today 07:58"), tone: s("safe") },
+        StatItem { label: s("LAST SCAN"), value: s("today 09:12"), sub: s("43,743 files"), tone: s("") },
     ]));
     ui.set_status_rows(m(vec![
         StatusRow { name: s("On-demand scanner"), value: s("Ready"), tone: s("safe") },
@@ -194,7 +196,21 @@ fn sample(ui: &AppWindow) {
         StatusRow { name: s("Quarantine"), value: s("2 files"), tone: s("off") },
         StatusRow { name: s("File shield"), value: s("Watching Downloads, Desktop, Startup"), tone: s("safe") },
         StatusRow { name: s("Process shield"), value: s("212 programs checked"), tone: s("safe") },
-        StatusRow { name: s("App"), value: s("v0.1.0 · up to date"), tone: s("safe") },
+        StatusRow { name: s("ClickFix shield"), value: s("1,208 copies checked"), tone: s("safe") },
+        StatusRow { name: s("Stealer shield"), value: s("Guarding 14 secret stores"), tone: s("safe") },
+        StatusRow { name: s("Ransomware shield"), value: s("Watching your folders"), tone: s("safe") },
+        StatusRow { name: s("Script shield"), value: s("Checking scripts as they run"), tone: s("safe") },
+        StatusRow { name: s("Background protection"), value: s("Starts with Windows"), tone: s("safe") },
+        StatusRow { name: s("App"), value: s("v0.5.1 · up to date"), tone: s("safe") },
+    ]));
+    ui.set_shields_on(s("6/6"));
+    ui.set_home_events(m(vec![
+        EventRow { when: s("today 09:13"), title: s("Quick scan · 43,743 files, 2 found"), detail: s(""), chip: s("SCAN"), tone: s("alarm") },
+        EventRow { when: s("today 09:13"), title: s("Test/Any.HashMarker!a moved to quarantine"), detail: s(""), chip: s("QUARANTINE"), tone: s("warn") },
+        EventRow { when: s("today 08:40"), title: s("Cleaned 1.2 GB of browser caches"), detail: s(""), chip: s("CLEAN"), tone: s("safe") },
+        EventRow { when: s("today 07:58"), title: s("Rules updated · 5,133 rules"), detail: s(""), chip: s("UPDATE"), tone: s("scan") },
+        EventRow { when: s("Nov 7, 21:00"), title: s("System scan · 212,480 files, nothing found"), detail: s(""), chip: s("SCAN"), tone: s("safe") },
+        EventRow { when: s("Nov 7, 18:22"), title: s("Disabled OneDrive Updater at startup"), detail: s(""), chip: s("STARTUP"), tone: s("oxide") },
     ]));
     let mut daily = std::collections::BTreeMap::new();
     let today = chrono::Local::now().date_naive();
@@ -286,6 +302,7 @@ MZ··············"));
     ui.set_scan_files(s("94,210"));
     ui.set_scan_threats(1);
     ui.set_scan_speed(s("1,912"));
+    ui.set_scan_speed_history(m((0..60).map(|i| 0.45 + 0.35 * ((i as f32) * 0.37).sin().abs() + if i % 9 == 0 { 0.15 } else { 0.0 }).map(|v: f32| v.min(1.0)).collect::<Vec<f32>>()));
     ui.set_scan_time(s("4:02"));
     ui.set_scan_fraction(0.42);
     let lit = (0.42 * 288.0) as usize;
@@ -372,13 +389,13 @@ pub fn run(dir: PathBuf) -> Result<(), PlatformError> {
     ui.set_app_update_status(s("Version 0.2.0 is signed and ready. Hexward restarts to finish."));
     go("about");
     snap("10-about-update")?;
-    ui.set_toast_visible(true);
-    ui.set_toast_state(s("alarm"));
-    ui.set_toast_title(s("1 found by the system scan"));
-    ui.set_toast_text(s("Nothing was changed. Open Hexward to choose: quarantine, delete or allow."));
+    ui.set_toasts(m(vec![
+        ToastItem { id: 1, state: s("safe"), title: s("Rules updated"), text: s("5,134 rules and 9,812 known-bad hashes are ready."), action: s(""), target: s(""), life: 0.4 },
+        ToastItem { id: 2, state: s("alarm"), title: s("File shield found Trojan/Win.Agent!a"), text: s("invoice.pdf.exe in Downloads: suspicious, not confirmed. Left in place. Open Hexward to decide."), action: s("Review"), target: s("results"), life: -1.0 },
+    ]));
     go("home");
     snap("11-home-update-toast")?;
-    ui.set_toast_visible(false);
+    ui.set_toasts(m(vec![]));
     ui.global::<Theme>().set_dark(false);
     snap("12-home-light")?;
     go("results");

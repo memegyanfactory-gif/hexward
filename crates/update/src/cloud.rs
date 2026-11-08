@@ -37,7 +37,7 @@ fn agent(secs: u64) -> ureq::Agent {
         .into()
 }
 
-fn base() -> String {
+pub(crate) fn base() -> String {
     // For testing against a local copy of the website (wrangler dev).
     std::env::var("HEXWARD_CLOUD").ok().filter(|s| s.starts_with("http")).unwrap_or_else(|| BASE.into())
 }
