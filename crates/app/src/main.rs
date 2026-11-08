@@ -614,7 +614,10 @@ fn row_for(r: &FileReport, selected: bool) -> ThreatRow {
     ThreatRow {
         name: format!("{}{more}", d.name).into(),
         path: r.path.display().to_string().into(),
-        description: d.description.clone().into(),
+        description: match &d.inner {
+            Some(inner) => format!("Found inside: {inner}. {}", d.description).into(),
+            None => d.description.clone().into(),
+        },
         chip: chip.into(),
         tone: (if confirmed { "alarm" } else { "warn" }).into(),
         selected,

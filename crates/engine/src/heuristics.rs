@@ -16,6 +16,10 @@ const DOCUMENT: &[&str] = &[
     "mp3", "mp4", "mov", "avi", "mkv", "wav", "zip", "rar", "7z",
 ];
 
+pub(crate) fn is_runnable_name(name: &str) -> bool {
+    ext_lower(name).is_some_and(|e| RUNNABLE.contains(&e.as_str()) || matches!(e.as_str(), "dll" | "iso" | "img" | "vhd" | "vhdx" | "msix" | "jar"))
+}
+
 fn ext_lower(name: &str) -> Option<String> {
     let (_, ext) = name.rsplit_once('.')?;
     Some(ext.trim().to_ascii_lowercase())

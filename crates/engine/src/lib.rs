@@ -8,14 +8,18 @@
 //! 5. content checks (Windows programs disguised as documents or images)
 
 pub mod allowlist;
+pub mod container;
 pub mod detect;
 pub mod eicar;
 pub mod hashdb;
 pub mod heuristics;
 pub mod history;
+pub mod lnk;
 pub mod locations;
+pub mod office;
 pub mod rules;
 pub mod scan;
+pub mod scripts;
 pub mod sig;
 pub mod startup;
 pub mod vault;

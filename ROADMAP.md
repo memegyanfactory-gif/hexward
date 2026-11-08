@@ -1,88 +1,98 @@
 # Hexward roadmap
 
-Goal: a free, open-source Windows security suite in Rust that stands next to Norton, McAfee, Avast,
-Avira and Malwarebytes on protection, beats them on honesty and false alarms, and adds what they
-don't have: protection against poisoned code, packages and AI coding agents.
+Goal: the best antivirus and anti-malware product available. It should match the leaders on protection,
+beat them on false alarms, honesty and privacy, and protect developers and AI agents, which nobody else does.
+The reasoning and sources behind this order are in [docs/STRATEGY.md](docs/STRATEGY.md).
 
-"Best" is proven by independent lab results (AV-TEST, AV-Comparatives, SE Labs), never claimed.
-
+"Best" is proven by independent labs (AV-TEST, AV-Comparatives, SE Labs, AVLab), never claimed.
 Each phase ships as a signed release through the GitHub pipeline and reaches users by the in-app updater.
 
 ---
 
-## Phase 1 · Scanner you can trust (now)
+## Phase 1 · Scanner you can trust (done)
 
-Done
-- Rust engine: hash lists, YARA-X rules, EICAR, file-name tricks, disguised programs
-- YARA Forge rule packs (5,100+ rules), MalwareBazaar hashes with an abuse.ch key
-- False-alarm guards: signed software never auto-quarantined, disabled-rule list, hunting rules = suspicious
-- Encrypted quarantine with restore; startup-item checker and fixer with undo
-- `hexward` command line; desktop app (Slint) with 8 screens; local history and threat map
+- Rust engine: hash lists, YARA-X rules (5,100+ from YARA Forge), EICAR, file-name tricks, disguised programs
+- False-alarm guards: a pattern rule alone never quarantines signed software; disabled-rule list; Allow list
+- Encrypted, reversible quarantine; Delete only on request; startup checker and fixer with undo
+- Desktop app (Slint) with pixel animation, tray, notifications; `hexward` command line
+- Signed self-update from GitHub Releases; release pipeline with tests, lints and signing
 
-In progress
-- One-piece window: custom title bar inside the app, cleaner visuals
-- Scan picker: Quick, System (Windows + Program Files + startup + running programs), Full, and Custom
-  (tick any drives, add any number of folders or projects, scan them together)
-- Per-result choice: Quarantine, Delete forever, or Allow (trust this file from now on)
-- Tray icon and Windows notifications; closing the window keeps Hexward in the tray
-- Signed self-update from GitHub Releases + release pipeline (tests → build → sign → publish)
+## Phase 1.5 · Look inside everything (in progress)
 
-## Phase 2 · Code and supply-chain security (the thing nobody else does well)
+Built from scratch in Rust; every parser has hard limits (depth, entries, bytes, compression ratio).
+- [x] ZIP (and Office/JAR/APK/MSIX built on it), 7z, GZIP, TAR, ISO 9660; nested up to 3 levels
+- [x] Zip-bomb detection, password-protected archive hiding a program, small disk image hiding a program
+- [x] LNK shortcut analysis per MS-SHLLINK: LOLBin targets, hidden or encoded arguments, oversized payloads
+- [ ] Office macros (OLE/VBA, OOXML), RTF, PDF JavaScript, OneNote attachments
+- [ ] Scripts: HTA, JS, VBS, WSF, PowerShell, with de-obfuscation; SVG and HTML smuggling
+- [ ] Installers and packers: MSI, MSIX manifests, NSIS, Inno Setup, UPX, PyInstaller
+- [ ] RAR, CAB, VHD/VHDX, IMG/UDF; `.url` files with WebDAV or `file://` targets
+- [ ] Scan cache keyed by file ID + size + rule version, so repeat scans skip unchanged files
+- [ ] **False-alarm gate in CI:** every rule pack is scanned against a clean corpus first (Windows system
+      files, NSRL Modern sets, top winget installers, popular games); any hit on a Microsoft-signed file fails the release
+- [ ] **Signed, staged rule packs:** a separate offline key; canary → 10% → 100% picked locally by each client;
+      instant rollback; kill switch; boot-loop breaker
+- [ ] Head-to-head benchmark against KicomAV and ClamAV in a VM; results published
 
-`hexward audit <folder or git URL>` and an "Audit a project" screen.
-- Install-time code: npm `preinstall`/`postinstall`, Python `setup.py`, Cargo `build.rs`, Makefiles, git hooks
-- Known compromised package versions (lockfiles: package-lock, yarn, pnpm, Cargo.lock, poetry, requirements)
-- Typosquats and dependency confusion (names one edit away from popular packages, unpinned internal names)
-- Obfuscated or injected code: long base64/hex blobs, `eval`/`Function` on decoded strings, crypto-wallet
-  address swaps, beacons to paste sites, credential grabbing (`.npmrc`, `.ssh`, cloud keys, browser data)
-- Hidden text for AI agents: invisible Unicode (tags, zero-width, bidi), prompt injection in README,
-  `AGENTS.md`, `CLAUDE.md`, `.cursorrules`, issue templates, MCP configs
-- Leaked secrets in files and git history (API keys, tokens, private keys)
-- CI risks: GitHub Actions pinned to tags instead of commit SHAs, `pull_request_target` misuse, script injection
-- Signed, explainable report with a fix for each finding
+## Phase 2 · Real-time protection, user mode (the gate to every lab test)
 
-## Phase 3 · Guardrails for AI agents and command-line tools
+- [ ] Background service: ETW process-start and file-write events → scan → stop and quarantine
+- [ ] AMSI provider: scans PowerShell, VBScript, JScript and Office macros as they run (no Microsoft approval needed)
+- [ ] Download watcher and scan-on-Mark-of-the-Web; copy the archive's Mark-of-the-Web onto everything extracted
+- [ ] **Stealer shield:** alert when a non-browser program reads browser passwords and cookies, wallets or Discord/Telegram sessions
+- [ ] **ClickFix shield:** catch commands copied from a browser and pasted into Run, Terminal or Explorer's address bar
+- [ ] Suspicious process chains: browser, Office or Explorer starting mshta, wscript, `powershell -enc`, `regsvr32 /i:http`, `certutil -urlcache`
+- [ ] Vulnerable-driver blocklist (Microsoft list + LOLDrivers); alert on new kernel-driver services
+- [ ] Quiet mode for games; idle and low-priority scanning; performance budget (AV-Comparatives impact ≤ 10)
 
-"Hexward Guard": a policy layer that sits in front of coding agents (Claude Code, Cursor, Codex,
-Copilot CLI and others) and plain shells.
-- Hooks that check each command before it runs: blocks `curl | sh`, unknown package installs,
-  reading `~/.ssh`/browser data/credential stores, mass deletes, force-pushes, edits outside the project
-- Package firewall: new installs are checked against Phase 2 data before they reach disk
-- Git protection: blocks pushes of secrets, unsigned commits to protected branches, hook tampering
-- Every block explained in plain words, with a one-click allow for the user (never for the agent)
+## Phase 3 · Developer, supply-chain and AI-agent protection (our edge)
 
-## Phase 4 · Real-time protection
+`hexward audit <folder or git URL>`, an "Audit a project" screen, and Hexward Guard.
+- Install-time code: npm `preinstall`/`postinstall`, `setup.py`/`pyproject`, Cargo `build.rs`, `binding.gyp`, git hooks
+- Known-malicious versions (OSV `MAL-*`), phantom dependencies, version jumps, 10× size growth, releases with no git tag
+- Agent and IDE configs: `.claude/settings.json` hooks, `.vscode/tasks.json` folder-open tasks, MCP configs, workflows
+- Hidden text for AI agents: Unicode tags, zero-width and bidi characters, prompt injection in README/AGENTS.md/CLAUDE.md/.cursorrules
+- GitHub Actions: tags instead of commit SHAs, `pull_request_target` misuse, broad permissions
+- Leaked secrets in files and git history
+- Guard: checks commands from agent processes before they run (`curl | sh`, credential reads, force-pushes, edits to agent
+  configs, permission-bypass flags); MCP servers pinned by hash; the user approves, never the agent
+- Extension inventory: VS Code, Cursor, Open VSX and browser extensions, with version diffs
 
-- File shield: Windows minifilter driver (signed), scan on open, write and execute
-- Behavior shield: ransomware detection (mass encryption, canary files) with automatic file rollback
-- Exploit and script shield: AMSI provider for PowerShell, VBScript, JScript, Office macros
-- Web shield: block known phishing and malware domains (local DNS filter, no traffic leaves the PC)
-- USB and download scanning; scheduled scans; game/full-screen quiet mode
-- Microsoft Virus Initiative membership, then register as the Windows antivirus
+## Phase 4 · Smarter detection
 
-## Phase 5 · Cloud intelligence (opt-in)
+- Static machine learning on Windows programs (EMBER2024 LightGBM, Apache-2.0) as one signal at a very strict threshold, never alone
+- Memory scanning of running processes with YARA
+- Ransomware shield: canary files, rename/entropy bursts, shadow-copy deletion attempts; file rollback
+- Unpacking and emulation for common packers
 
-Requires the Hexward website and API. Off by default; users choose what to share.
-- Share detection reports: file hash, detection name, rule, Hexward version. Never file contents, paths or names
-- Optional: submit a suspicious file for analysis (user clicks, sees exactly what is sent)
-- Website dashboard: detections over time, top families, false-alarm reports, git/package findings
-- Internal database grows from shared reports, lab samples and community rules; feeds back into rule packs
-- Privacy policy, GDPR basics, data deletion on request; published transparency report
+## Phase 5 · Certification, free route
 
-## Phase 6 · Full suite and proof
+Zero-cost rule: the founder pays no one (see docs/STRATEGY.md §0).
+- Free Authenticode signing through the SignPath Foundation (open-source program), wired into the release workflow
+- EULA and privacy policy (the GPL already disclaims warranty); published criteria for unwanted software
+- Internal AMTSO-style tests published; then the free test series: AVLab, AV-Comparatives main series, SE Labs
+- Run alongside Microsoft Defender as a second layer; no attempt to replace it in Security Center
 
-- Machine-learning model for Windows programs (trained on EMBER/SOREL-20M, runs in Rust via tract)
-- Firewall rules UI, Wi-Fi checks, browser extension checks, data-breach checks
-- Independent lab tests every quarter, results published in the app whatever they say
+Paused while the zero-cost rule stands (they need paid signing or certificates):
+- Microsoft Virus Initiative → early-launch driver → protected service → Security Center registration → threat ETW
+- Kernel minifilter for pre-execution blocking; Microsoft's user-mode security platform (WESP) through MVI
+
+## Phase 6 · Cloud intelligence (opt-in) and the Hexward website
+
+- Hash-prefix reputation lookups (k-anonymity); certificate and signer reputation; community allow list
+- Separate opt-in for detection reports and sample upload; never browsing data; published retention policy
+- Website dashboard: detections over time, false-alarm reports, supply-chain findings; internal database feeding rule packs
+- Transparency report every year
 
 ---
 
 ## False-alarm policy (the GTA Vice City rule)
 
-Old games and tools (no-CD fixes, packers, trainers) are where Avast and Avira used to delete working files.
+Old games and tools (no-CD fixes, packers, trainers) are where other antivirus products have deleted working files.
 Hexward never deletes on its own:
 - Only exact known-bad hashes and high-confidence rules can be quarantined automatically, and only on request
-- Unsigned old programs with a pattern match are shown as "suspicious" with the reason
+- Unsigned old programs with a pattern match are shown as "suspicious", with the reason
 - Every result offers Quarantine, Delete forever or Allow; quarantine is always reversible
 - Allowed files are remembered by hash and never flagged again
-- Users can report a false alarm in one click (Phase 5); fixed rules ship in the next rule update
+- Microsoft-signed system files are never acted on
+- False-alarm reports (Phase 6) feed rule fixes shipped in the next staged update

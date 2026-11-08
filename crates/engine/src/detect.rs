@@ -56,11 +56,14 @@ pub struct Detection {
     pub author: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reference: Option<String>,
+    /// For hits inside an archive or disk image: where, e.g. `docs › invoice.pdf.exe`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inner: Option<String>,
 }
 
 impl Detection {
     pub fn new(name: impl Into<String>, severity: Severity, source: Source, description: impl Into<String>) -> Self {
-        Detection { name: name.into(), severity, source, description: description.into(), rule: None, author: None, reference: None }
+        Detection { name: name.into(), severity, source, description: description.into(), rule: None, author: None, reference: None, inner: None }
     }
 
     /// Confirmed matches (hash, rule, EICAR) may be quarantined automatically.

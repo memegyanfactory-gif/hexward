@@ -385,8 +385,11 @@ fn print_report(st: &Style, t: &FileReport) {
         if i == 0 {
             println!("  {}  {}{}", st.sev(d.severity), d.name, tag);
             println!("          {}", t.path.display());
+            if let Some(inner) = &d.inner {
+                println!("          {}", st.dim(&format!("inside: {inner}")));
+            }
         } else {
-            println!("          also: {}{}", d.name, tag);
+            println!("          also: {}{}{}", d.name, tag, d.inner.as_ref().map(|i| format!("  (inside: {i})")).unwrap_or_default());
         }
     }
     println!("          {}", st.dim(&t.detections[0].description));

