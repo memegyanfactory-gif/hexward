@@ -67,10 +67,10 @@ Startup manager
 - [ ] Scheduled tasks and services on/off (asks for admin only when needed)
 
 Task manager
-- [ ] Processes grouped: Windows (system), Apps (with a window), Background
-- [ ] Windows and security processes are protected: they can't be ended from Hexward
-- [ ] End task, scan with Hexward, open file location, live CPU and memory
-- [ ] Unsigned programs running from Temp or Downloads highlighted
+- [x] Processes grouped: Windows (system), Apps (with a window), Background; SYSTEM services resolved through the Service Control Manager
+- [x] Windows and security processes are protected: they can't be ended from Hexward
+- [x] End task (with a confirm step), scan with Hexward, open file location, live CPU and memory, program icons and publishers
+- [x] Unsigned programs running from Temp or Downloads highlighted
 
 Cleaner
 - [ ] Detect installed browsers (Chrome, Edge, Firefox, Brave, Opera, Opera GX, Vivaldi, Yandex) and show their own icons

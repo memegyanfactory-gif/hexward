@@ -6,7 +6,9 @@
 #[allow(dead_code)]
 mod art;
 mod clipboard;
+mod icons;
 mod shields;
+mod taskman;
 mod shots;
 
 use std::cell::RefCell;
@@ -140,6 +142,7 @@ struct State {
     next_app_check: Instant,
     window_visible: bool,
     shields: shields::Shields,
+    tasks: taskman::TaskMan,
     /// Message-only window that owns clipboard text Hexward writes (created on the UI thread).
     #[cfg(windows)]
     clip_owner: windows_sys::Win32::Foundation::HWND,
@@ -254,6 +257,9 @@ pub(crate) fn set_assets(ui: &AppWindow) {
     a.set_i_disk(icon("disk"));
     a.set_i_trash(icon("trash"));
     a.set_i_check(icon("check"));
+    a.set_i_tasks(icon("tasks"));
+    a.set_i_sparkle(icon("sparkle"));
+    a.set_i_lock(icon("lock"));
     ui.set_app_icon(to_image(art::render(&art::MARK, 4, art::mark_color(art::MOSS_HI, art::MOSS_LO, Some(art::OXIDE)))));
 }
 
@@ -442,6 +448,8 @@ fn refresh_history(ui: &AppWindow) {
                 EventKind::Delete => ("DELETE", "off"),
                 EventKind::Update => ("UPDATE", "scan"),
                 EventKind::StartupFix => ("STARTUP", "oxide"),
+                EventKind::EndTask => ("TASK", "warn"),
+                EventKind::Clean => ("CLEAN", "safe"),
             };
             EventRow { when: when(e.at).into(), title: e.title.clone().into(), detail: e.detail.clone().into(), chip: chip.into(), tone: tone.into() }
         })
@@ -1085,6 +1093,7 @@ fn tick(st: &mut State, ui: &AppWindow) {
         refresh_home(st, ui);
     }
     tick_scan(st, ui);
+    taskman::tick(st, ui);
     for ev in st.shields.drain() {
         shield_hit(st, ui, ev);
     }
@@ -1244,11 +1253,13 @@ fn main() -> Result<(), slint::PlatformError> {
         next_app_check: Instant::now() + Duration::from_secs(6 * 3600),
         window_visible: true,
         shields: shields::Shields::start(settings_shields.0, settings_shields.1, settings_shields.2, settings_shields.3, settings_shields.4),
+        tasks: taskman::TaskMan::new(),
         #[cfg(windows)]
         clip_owner: clipboard::owner_window(),
     }));
     {
         let mut s = st.borrow_mut();
+        ui.set_tasks(s.tasks.model());
         load_engine(&mut s);
         refresh_vault(&s, &ui);
         refresh_home(&s, &ui);
@@ -1275,7 +1286,9 @@ fn main() -> Result<(), slint::PlatformError> {
     }
 
     on!(on_navigate, |s, u, page: SharedString| {
+        s.tasks.set_active(page == "tasks");
         match page.as_str() {
+            "tasks" => taskman::show(s, &u),
             "home" => refresh_home(s, &u),
             "vault" => refresh_vault(s, &u),
             "history" => refresh_history(&u),
@@ -1437,6 +1450,11 @@ fn main() -> Result<(), slint::PlatformError> {
             Err(e) => toast(s, &u, "warn", "Couldn't delete", &e.to_string()),
         }
     });
+    on!(on_tasks_changed, |s, u| { taskman::show(s, &u) });
+    on!(on_task_ask_end, |s, u, pid: i32| { taskman::ask_end(s, &u, pid) });
+    on!(on_task_end, |s, u, pid: i32| { taskman::end(s, &u, pid) });
+    on!(on_task_scan, |s, u, path: SharedString| { taskman::scan(s, &u, path) });
+    on!(on_task_open, |_s, _u, path: SharedString| { taskman::open_location(path) });
     on!(on_update_rules, |s, u| { update_rules(s, &u) });
     on!(on_check_app_update, |s, u| { check_app_update(s, &u, Duration::ZERO) });
     on!(on_install_app_update, |s, u| { install_app_update(s, &u) });

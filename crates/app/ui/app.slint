@@ -18,6 +18,7 @@ export struct StatItem { label: string, value: string }
 export struct StatusRow { name: string, value: string, tone: string }
 export struct DriveRow { root: string, label: string, info: string, selected: bool, usage: float }
 export struct AllowRow { sha: string, name: string, path: string }
+export struct TaskRow { pid: int, name: string, detail: string, path: string, icon: image, has-icon: bool, cpu: string, cpu-frac: float, mem: string, mem-frac: float, protected: bool, risky: bool, confirm: bool }
 
 export global Theme {
     in-out property <bool> dark: true;
@@ -69,6 +70,9 @@ export global Assets {
     in property <image> i-disk;
     in property <image> i-trash;
     in property <image> i-check;
+    in property <image> i-tasks;
+    in property <image> i-sparkle;
+    in property <image> i-lock;
 }
 
 // ---------- type ----------
@@ -467,6 +471,50 @@ component SettingRow inherits Rectangle {
     if !root.last: Rectangle { x: 0; y: parent.height - 2px; width: parent.width; height: 2px; background: Theme.line; }
 }
 
+component SearchBox inherits Rectangle {
+    in-out property <string> text;
+    in property <string> placeholder: "Search";
+    callback edited();
+    width: 220px;
+    height: 30px;
+    background: Theme.bg;
+    Edges { x: 0; y: 0; width: root.width; height: root.height; edge: ti.has-focus ? Theme.accent : Theme.line-strong; }
+    Image { x: 9px; y: (parent.height - 14px) / 2; width: 14px; height: 14px; source: Assets.i-scan; colorize: Theme.fg-3; image-rendering: pixelated; }
+    if root.text == "": Text {
+        x: 30px;
+        height: parent.height;
+        vertical-alignment: center;
+        text: root.placeholder;
+        color: Theme.fg-3;
+        font-family: Theme.body;
+        font-size: 13px;
+    }
+    ti := TextInput {
+        x: 30px;
+        width: parent.width - 38px;
+        height: parent.height;
+        vertical-alignment: center;
+        single-line: true;
+        text <=> root.text;
+        font-family: Theme.body;
+        font-size: 13px;
+        color: Theme.fg;
+        selection-background-color: Theme.accent.with-alpha(0.35);
+        edited => {
+            root.edited();
+        }
+    }
+}
+
+// A thin usage bar: 0..1.
+component Meter inherits Rectangle {
+    in property <float> value;
+    in property <color> tone: Theme.heat-3;
+    height: 6px;
+    background: Theme.raised;
+    Rectangle { x: 0; width: parent.width * Math.clamp(root.value, 0, 1); height: parent.height; background: root.tone; animate width { duration: 300ms; } }
+}
+
 component Header inherits VerticalLayout {
     in property <string> eyebrow;
     in property <string> title;
@@ -675,6 +723,20 @@ export component AppWindow inherits Window {
     in property <bool> startup-checked;
     in property <bool> startup-show-all;
 
+    // Tasks
+    in property <[TaskRow]> tasks;
+    in-out property <string> tasks-group: "apps";
+    in-out property <string> tasks-search;
+    in-out property <string> tasks-sort: "Name";
+    in property <int> tasks-n-apps;
+    in property <int> tasks-n-background;
+    in property <int> tasks-n-windows;
+    in property <int> tasks-risky;
+    in property <string> tasks-cpu: "…";
+    in property <string> tasks-mem: "…";
+    in property <bool> tasks-loading: true;
+    in property <bool> tasks-scanning;
+
     // Quarantine, history, allow list
     in property <[VaultRow]> vault-rows;
     in property <[EventRow]> events;
@@ -727,6 +789,11 @@ export component AppWindow inherits Window {
     callback set-show-all(bool);
     callback disable-startup(int);
     callback restore-startup(string);
+    callback tasks-changed();
+    callback task-ask-end(int);
+    callback task-end(int);
+    callback task-scan(string);
+    callback task-open(string);
     callback vault-restore(string);
     callback vault-ask(int);
     callback vault-cancel(int);
@@ -752,7 +819,7 @@ export component AppWindow inherits Window {
     callback toggle-maximize();
     callback close-window();
 
-    property <bool> moving: root.scanning || root.boot < 1 || root.flash || root.startup-busy || root.updating || root.app-update-busy || root.home-state == "alarm";
+    property <bool> moving: root.scanning || root.boot < 1 || root.flash || root.startup-busy || root.updating || root.app-update-busy || root.home-state == "alarm" || root.tasks-scanning || (root.page == "tasks" && root.tasks-loading);
     Timer {
         interval: 33ms;
         running: root.moving;
@@ -778,7 +845,7 @@ export component AppWindow inherits Window {
         root.navigate(p);
     }
 
-    property <string> page-name: root.page == "home" ? "HOME" : root.page == "scan" ? "SCAN" : root.page == "results" ? "RESULTS" : root.page == "startup" ? "STARTUP" : root.page == "vault" ? "QUARANTINE" : root.page == "history" ? "HISTORY" : root.page == "settings" ? "SETTINGS" : "ABOUT";
+    property <string> page-name: root.page == "home" ? "HOME" : root.page == "scan" ? "SCAN" : root.page == "results" ? "RESULTS" : root.page == "startup" ? "STARTUP" : root.page == "tasks" ? "TASKS" : root.page == "cleaner" ? "CLEANER" : root.page == "vault" ? "QUARANTINE" : root.page == "history" ? "HISTORY" : root.page == "settings" ? "SETTINGS" : "ABOUT";
 
     VerticalLayout {
         // ---------- title bar ----------
@@ -873,6 +940,7 @@ export component AppWindow inherits Window {
                     }
                     NavItem { text: "Results"; icon: Assets.i-bug; active: root.page == "results"; badge: root.open-count > 0 ? root.open-count : ""; clicked => { root.go("results"); } }
                     NavItem { text: "Startup"; icon: Assets.i-bolt; active: root.page == "startup"; clicked => { root.go("startup"); } }
+                    NavItem { text: "Tasks"; icon: Assets.i-tasks; active: root.page == "tasks"; badge: root.tasks-risky > 0 ? root.tasks-risky : ""; badge-tone: Theme.amber; clicked => { root.go("tasks"); } }
                     NavItem { text: "Quarantine"; icon: Assets.i-vault; active: root.page == "vault"; badge: root.vault-rows.length > 0 ? root.vault-rows.length : ""; badge-tone: Theme.fg-3; clicked => { root.go("vault"); } }
                     NavItem { text: "History"; icon: Assets.i-clock; active: root.page == "history"; clicked => { root.go("history"); } }
                     Rectangle { vertical-stretch: 1; }
@@ -1301,6 +1369,118 @@ export component AppWindow inherits Window {
                                     }
                                 }
                             }
+                        }
+                    }
+                }
+
+                // TASKS
+                if root.page == "tasks": Screen {
+                    VerticalLayout {
+                        padding: 34px;
+                        padding-top: 30px;
+                        spacing: 18px;
+                        Header { eyebrow: "TASK MANAGER"; title: "What's running"; text: "Everything running on this PC, sorted into apps, background programs and Windows itself. Windows and security programs are locked, so nothing vital gets closed by accident."; }
+                        HorizontalLayout {
+                            spacing: 14px;
+                            Stat { label: "CPU"; value: root.tasks-cpu; }
+                            Stat { label: "MEMORY IN USE"; value: root.tasks-mem; big: false; }
+                            Stat { label: "PROGRAMS"; value: root.tasks-n-apps + root.tasks-n-background + root.tasks-n-windows; }
+                            Stat { label: "WORTH A LOOK"; value: root.tasks-risky; tone: root.tasks-risky > 0 ? Theme.amber : Theme.fg; }
+                        }
+                        HorizontalLayout {
+                            spacing: 8px;
+                            Btn { text: "Apps · " + root.tasks-n-apps; small: true; kind: root.tasks-group == "apps" ? "primary" : "ghost"; clicked => { root.tasks-group = "apps"; root.tasks-changed(); } }
+                            Btn { text: "Background · " + root.tasks-n-background; small: true; kind: root.tasks-group == "background" ? "primary" : "ghost"; clicked => { root.tasks-group = "background"; root.tasks-changed(); } }
+                            Btn { text: "Windows · " + root.tasks-n-windows; small: true; kind: root.tasks-group == "windows" ? "primary" : "ghost"; clicked => { root.tasks-group = "windows"; root.tasks-changed(); } }
+                            Rectangle { horizontal-stretch: 1; }
+                            VerticalLayout { alignment: center; SearchBox { text <=> root.tasks-search; placeholder: "Search programs"; edited => { root.tasks-changed(); } } }
+                            Seg { options: ["Name", "CPU", "Memory"]; value: root.tasks-sort; picked(v) => { root.tasks-sort = v; root.tasks-changed(); } }
+                        }
+                        if root.tasks-group == "windows": HorizontalLayout {
+                            spacing: 10px;
+                            VerticalLayout { alignment: center; Image { source: Assets.i-lock; width: 16px; height: 16px; colorize: Theme.fg-3; image-rendering: pixelated; } }
+                            Body { text: "These are part of Windows. Ending them can crash or freeze the PC, so Hexward only shows them."; font-size: 13px; color: Theme.fg-3; }
+                        }
+                        ScrollView {
+                            vertical-stretch: 1;
+                            VerticalLayout {
+                                padding: 4px;
+                                spacing: 8px;
+                                alignment: start;
+                                if root.tasks-loading: HorizontalLayout {
+                                    spacing: 12px;
+                                    alignment: start;
+                                    PixelSpinner { frame: root.frame; }
+                                    VerticalLayout { alignment: center; Body { text: "Reading running programs…"; font-size: 13px; } }
+                                }
+                                if !root.tasks-loading && root.tasks.length == 0: Empty { icon: Assets.i-tasks; title: "Nothing here"; text: root.tasks-search != "" ? "No program matches that search." : "No programs in this group right now."; }
+                                for t in root.tasks: Panel {
+                                    fill: t.confirm ? Theme.raised : Theme.surface;
+                                    edge: t.confirm ? Theme.alarm.with-alpha(0.6) : t.risky ? Theme.amber.with-alpha(0.7) : Theme.line;
+                                    HorizontalLayout {
+                                        padding: 10px;
+                                        padding-left: 14px;
+                                        padding-right: 12px;
+                                        spacing: 14px;
+                                        VerticalLayout {
+                                            alignment: center;
+                                            Rectangle {
+                                                width: 32px;
+                                                height: 32px;
+                                                if t.has-icon: Image { x: 0; y: 0; width: 32px; height: 32px; source: t.icon; }
+                                                if !t.has-icon: Image { x: 6px; y: 6px; width: 20px; height: 20px; source: t.protected ? Assets.i-shield : Assets.i-file; colorize: Theme.fg-3; image-rendering: pixelated; }
+                                            }
+                                        }
+                                        VerticalLayout {
+                                            alignment: center;
+                                            spacing: 3px;
+                                            horizontal-stretch: 1;
+                                            HorizontalLayout {
+                                                spacing: 8px;
+                                                Text { text: t.name; font-family: Theme.body; font-size: 14px; font-weight: 600; color: Theme.fg; overflow: elide; vertical-alignment: center; horizontal-stretch: 1; }
+                                                if t.risky: Chip { text: "UNSIGNED · RISKY FOLDER"; tone: Theme.amber; }
+                                                if t.protected: Chip { text: "LOCKED"; tone: Theme.fg-3; }
+                                            }
+                                            Mono { text: t.detail; color: Theme.fg-3; font-size: 11px; }
+                                        }
+                                        VerticalLayout {
+                                            alignment: center;
+                                            spacing: 5px;
+                                            width: 84px;
+                                            Mono { text: "CPU " + t.cpu; font-size: 11px; color: Theme.fg-2; }
+                                            Meter { value: t.cpu-frac * 4; tone: t.cpu-frac > 0.2 ? Theme.amber : Theme.signal; }
+                                        }
+                                        VerticalLayout {
+                                            alignment: center;
+                                            spacing: 5px;
+                                            width: 84px;
+                                            Mono { text: t.mem; font-size: 11px; color: Theme.fg-2; }
+                                            Meter { value: t.mem-frac; }
+                                        }
+                                        if !t.confirm: HorizontalLayout {
+                                            spacing: 6px;
+                                            alignment: end;
+                                            width: 238px;
+                                            VerticalLayout { alignment: center; Btn { text: "Scan"; kind: "ghost"; small: true; enabled: t.path != "" && root.engine-ready && !root.tasks-scanning; clicked => { root.task-scan(t.path); } } }
+                                            VerticalLayout { alignment: center; Btn { text: "Folder"; kind: "quiet"; small: true; enabled: t.path != ""; clicked => { root.task-open(t.path); } } }
+                                            if !t.protected: VerticalLayout { alignment: center; Btn { text: "End task"; kind: "ghost"; small: true; clicked => { root.task-ask-end(t.pid); } } }
+                                            if t.protected: VerticalLayout { alignment: center; Rectangle { width: 74px; Image { x: (parent.width - 16px) / 2; y: (parent.height - 16px) / 2; width: 16px; height: 16px; source: Assets.i-lock; colorize: Theme.fg-3; image-rendering: pixelated; } } }
+                                        }
+                                        if t.confirm: HorizontalLayout {
+                                            spacing: 6px;
+                                            alignment: end;
+                                            width: 238px;
+                                            VerticalLayout { alignment: center; Btn { text: "End it"; kind: "danger"; small: true; clicked => { root.task-end(t.pid); } } }
+                                            VerticalLayout { alignment: center; Btn { text: "Cancel"; kind: "ghost"; small: true; clicked => { root.task-ask-end(-1); } } }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        HorizontalLayout {
+                            spacing: 10px;
+                            if root.tasks-scanning: PixelSpinner { frame: root.frame; }
+                            VerticalLayout { alignment: center; Mono { text: root.tasks-scanning ? "Scanning that program…" : "Ending a task closes every window of that program. Unsaved work in it is lost."; color: Theme.fg-3; } }
                         }
                     }
                 }

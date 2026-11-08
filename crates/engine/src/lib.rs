@@ -12,6 +12,7 @@ pub mod behavior;
 pub mod cache;
 pub mod container;
 pub mod detect;
+pub mod fileinfo;
 pub mod eicar;
 pub mod hashdb;
 pub mod heuristics;
@@ -23,7 +24,9 @@ pub mod rules;
 pub mod scan;
 pub mod scripts;
 pub mod sig;
+pub mod services;
 pub mod startup;
+pub mod tasks;
 pub mod vault;
 
 pub use detect::{Detection, Severity, Source};

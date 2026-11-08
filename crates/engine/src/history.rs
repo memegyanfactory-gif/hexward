@@ -19,6 +19,8 @@ pub enum EventKind {
     Delete,
     Update,
     StartupFix,
+    EndTask,
+    Clean,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
