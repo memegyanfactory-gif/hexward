@@ -39,7 +39,7 @@ here is what updates the page.
 - [x] CAB, RAR (file names and stored files), VHD/VHDX, IMG/UDF (programs carved from the image)
 - [x] MSI (embedded cabinets and custom-action programs), MSIX startup scripts, NSIS installers, UPX (NRV2B/2D/2E, LZMA), PyInstaller
 - [x] Inno Setup unpacking, best effort: setup header ([Run] commands, [Code] script) and compressed file chunks, programs carved out
-- [ ] Compressed RAR entries (unRAR isn't GPL-compatible; needs our own decoder)
+- [x] Compressed RAR 5 entries, with Hexward's own decoder (unRAR isn't GPL-compatible); RAR 4 compressed entries are still only listed
 - [x] Deeper script de-obfuscation (split strings, escapes, char-code arrays, reversed text, nested and compressed base64)
 - [x] Signed, staged rule packs: 5% → 25% → 100%, rollback, kill switch (daily rule-channel workflow)
 - [x] Bigger clean corpus for the gate: 16 popular installers and game launchers fetched fresh every release

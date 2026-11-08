@@ -2,6 +2,10 @@
 
 Each `## version` section becomes the release notes and the first line shows in the app's update banner.
 
+## 0.5.1
+
+- Compressed RAR files are now unpacked and scanned (RAR 5, WinRAR's format since 2013), with Hexward's own decoder
+
 ## 0.5.0
 
 - Ransomware rollback: Hexward keeps a private copy of your documents and photos, and Settings › Document backup › Restore puts back files ransomware damaged, renamed or removed (`hexward restore-files`)

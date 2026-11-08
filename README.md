@@ -13,7 +13,7 @@ No account. No ads. No paid tier. Nothing leaves your PC unless you choose to se
 ![Platform](https://img.shields.io/badge/Windows-10%20%7C%2011-0B0F14?logo=windows&logoColor=4BE07A)
 ![License](https://img.shields.io/badge/license-GPL--3.0-0B0F14?labelColor=1A7F45)
 ![Rules](https://img.shields.io/badge/YARA%20rules-5%2C100%2B-0B0F14?labelColor=1A7F45)
-![Tests](https://img.shields.io/badge/tests-141%20passing-0B0F14?labelColor=1A7F45)
+![Tests](https://img.shields.io/badge/tests-143%20passing-0B0F14?labelColor=1A7F45)
 
 <img src="docs/screenshots/01-home.png" alt="Hexward home screen" width="860">
 
@@ -30,7 +30,7 @@ and covers attacks Defender wasn't built for, like weaponized shortcuts, ClickFi
 | | |
 |---|---|
 | **Scans** | Quick, System, Full, or Custom (tick any drives, add any folders or projects, scan them together) |
-| **Looks inside** | ZIP and everything built on it (Office, JAR, APK, MSIX), 7z, GZIP, TAR, CAB, RAR (file list and stored files), ISO, VHD/VHDX and IMG disk images, MSI installers, NSIS installers, PyInstaller programs, UPX-packed programs, Office macros, RTF objects, PDF scripts and attachments, OneNote attachments, nested 3 levels deep |
+| **Looks inside** | ZIP and everything built on it (Office, JAR, APK, MSIX), 7z, GZIP, TAR, CAB, RAR (RAR 5 fully unpacked; RAR 4 file list and stored files), ISO, VHD/VHDX and IMG disk images, MSI installers, NSIS and Inno Setup installers, PyInstaller programs, UPX-packed programs, Office macros, RTF objects, PDF scripts and attachments, OneNote attachments, nested 3 levels deep |
 | **Detects** | 5,100+ community YARA rules, known-bad hashes, ~3,000 vulnerable and malicious kernel drivers (LOLDrivers and Microsoft's blocklist), the EICAR test file, Windows file-name tricks, disguised programs, shortcut, macro, script and installer droppers (including obfuscated ones: split strings, character codes, reversed and nested base64), Equation Editor exploits, auto-running PDF scripts, HTML and SVG smuggling, ClickFix pages, zip bombs |
 | **Guards in real time** | File, process, script, ClickFix and stealer shields: new downloads, every program that starts and who started it, PowerShell/VBScript/JScript/macros as they run (AMSI), commands copied from websites, anything that opens your browser passwords or wallets, and new kernel drivers. Starts with Windows; goes quiet during games and presentations. Confirmed threats are quarantined automatically (their process stopped first); suspicious finds always wait for you |
 | **Fixes** | Quarantine (encrypted, always reversible), Delete forever (asks first), or Allow (trust that exact file). Startup items can be switched off and back on |
@@ -281,7 +281,7 @@ docs/            strategy and research, screenshots
 ## Testing
 
 ```bash
-cargo test --workspace      # 141 tests
+cargo test --workspace      # 143 tests
 cargo clippy --workspace --all-targets -- -D warnings
 target\debug\hexward-app.exe --shots docs\screenshots   # renders every screen to PNG
 ```

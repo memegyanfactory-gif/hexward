@@ -1,5 +1,6 @@
 //! More file types to look inside: RTF embedded objects, PDF actions/JavaScript/attachments,
-//! OneNote attachments, CAB archives, RAR archives (file list and stored files), and raw disk
+//! OneNote attachments, CAB archives, RAR archives (file list, stored files, and RAR 5 compressed
+//! files through Hexward's own decoder in rar5.rs), and raw disk
 //! images (VHD, VHDX, IMG, UDF) where programs are carved out of the image bytes.
 //!
 //! Every reader is bounds-checked and capped by the shared container budget. None of them
@@ -332,11 +333,20 @@ fn vint(d: &[u8], o: &mut usize) -> Option<u64> {
     None
 }
 
-/// RAR: Hexward reads the file list (names are checked) and unpacks stored entries. Compressed
-/// entries need the proprietary RAR algorithm, whose license isn't GPL-compatible, so they're
-/// listed but not unpacked.
+struct RarEntry {
+    name: String,
+    encrypted: bool,
+    stored: bool,
+    /// RAR 5 compressed: (compression version, solid, unpacked size).
+    rar5: Option<(u8, bool, u64)>,
+    data: Option<std::ops::Range<usize>>,
+}
+
+/// RAR: Hexward reads the file list (names are checked), unpacks stored entries, and decodes RAR 5
+/// compressed entries with its own decoder (rar5.rs). Compressed RAR 4 entries (an older format
+/// with PPMd and a filter virtual machine) are listed but not unpacked.
 pub fn rar(data: &[u8], b: &mut Budget, ex: &mut Expansion) -> bool {
-    let mut entries: Vec<(String, bool, bool, Option<std::ops::Range<usize>>)> = Vec::new(); // name, encrypted, stored, data
+    let mut entries: Vec<RarEntry> = Vec::new();
     if data.starts_with(b"Rar!\x1a\x07\x01\x00") {
         // RAR 5
         let mut o = 8;
@@ -361,7 +371,7 @@ pub fn rar(data: &[u8], b: &mut Budget, ex: &mut Expansion) -> bool {
             if htype == 2 {
                 let mut p = o;
                 let fflags = vint(data, &mut p).unwrap_or(0);
-                let _unp = vint(data, &mut p);
+                let unp = vint(data, &mut p).unwrap_or(0);
                 let _attr = vint(data, &mut p);
                 if fflags & 2 != 0 {
                     p += 4;
@@ -378,7 +388,11 @@ pub fn rar(data: &[u8], b: &mut Budget, ex: &mut Expansion) -> bool {
                 let encrypted = extra as usize > 0 && { let mut q = 0; vint(extra_area, &mut q).is_some() && vint(extra_area, &mut q) == Some(1) };
                 let stored = (comp >> 7) & 7 == 0;
                 let range = next..next.saturating_add(dsize as usize);
-                entries.push((name, encrypted, stored, (range.end <= data.len()).then_some(range)));
+                let is_dir = fflags & 1 != 0;
+                if !is_dir {
+                    let rar5 = (!stored).then_some(((comp & 0x3f) as u8, comp & 0x40 != 0, unp));
+                    entries.push(RarEntry { name, encrypted, stored, rar5, data: (range.end <= data.len()).then_some(range) });
+                }
             }
             o = next.saturating_add(dsize as usize);
         }
@@ -400,7 +414,7 @@ pub fn rar(data: &[u8], b: &mut Budget, ex: &mut Expansion) -> bool {
                 let name_at = o + 32 + if flags & 0x100 != 0 { 8 } else { 0 };
                 let name = data.get(name_at..name_at + nlen).map(|n| String::from_utf8_lossy(n.split(|c| *c == 0).next().unwrap_or(n)).into_owned()).unwrap_or_default();
                 let range = o + hsize..o + hsize + pack;
-                entries.push((name, flags & 0x04 != 0, method == 0x30, (range.end <= data.len()).then_some(range)));
+                entries.push(RarEntry { name, encrypted: flags & 0x04 != 0, stored: method == 0x30, rar5: None, data: (range.end <= data.len()).then_some(range) });
                 o += hsize + pack;
             } else {
                 o += hsize + add_size;
@@ -411,16 +425,38 @@ pub fn rar(data: &[u8], b: &mut Budget, ex: &mut Expansion) -> bool {
         }
     }
     let mut unpacked_any = false;
-    for (name, encrypted, stored, range) in &entries {
-        if *encrypted {
-            ex.notes.push(Note::Encrypted { entry: name.clone() });
-        } else if *stored && let Some(r) = range {
+    let mut dec = crate::rar5::Unpacker::new();
+    for e in &entries {
+        if e.encrypted {
+            ex.notes.push(Note::Encrypted { entry: e.name.clone() });
+        } else if e.stored && let Some(r) = &e.data {
             unpacked_any = true;
-            if !add(b, ex, name.clone(), data[r.clone()].to_vec()) {
+            if !add(b, ex, e.name.clone(), data[r.clone()].to_vec()) {
                 break;
             }
+        } else if e.rar5.is_some_and(|(_, _, unp)| unp == 0) {
+            // an empty file: nothing to scan
+        } else if let (Some((version, solid, unp)), Some(r)) = (e.rar5, &e.data)
+            && version <= 1
+        {
+            // Bigger than the budget allows: decode the start (where droppers put their code) only.
+            let cap = (b.limits.max_entry as usize).min(b.limits.max_total.saturating_sub(b.bytes) as usize);
+            let packed = (r.end - r.start).max(1) as u64;
+            if unp / packed > b.limits.max_ratio && unp > b.limits.max_entry {
+                ex.notes.push(Note::Bomb { entry: e.name.clone(), ratio: unp / packed });
+                continue;
+            }
+            match dec.unpack(&data[r.clone()], unp as usize, version, solid, cap) {
+                Some(out) => {
+                    unpacked_any = true;
+                    if !add(b, ex, e.name.clone(), out) {
+                        break;
+                    }
+                }
+                None => ex.notes.push(Note::Listed { entry: e.name.clone() }),
+            }
         } else {
-            ex.notes.push(Note::Listed { entry: name.clone() });
+            ex.notes.push(Note::Listed { entry: e.name.clone() });
         }
     }
     !entries.is_empty() || unpacked_any

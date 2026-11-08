@@ -33,6 +33,7 @@ pub mod memscan;
 pub mod motw;
 pub mod locations;
 pub mod office;
+pub mod rar5;
 pub mod perf;
 pub mod ransom;
 pub mod rules;
