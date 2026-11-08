@@ -13,7 +13,7 @@ No account. No ads. No paid tier. Nothing leaves your PC unless you choose to se
 ![Platform](https://img.shields.io/badge/Windows-10%20%7C%2011-0B0F14?logo=windows&logoColor=4BE07A)
 ![License](https://img.shields.io/badge/license-GPL--3.0-0B0F14?labelColor=1A7F45)
 ![Rules](https://img.shields.io/badge/YARA%20rules-5%2C100%2B-0B0F14?labelColor=1A7F45)
-![Tests](https://img.shields.io/badge/tests-92%20passing-0B0F14?labelColor=1A7F45)
+![Tests](https://img.shields.io/badge/tests-123%20passing-0B0F14?labelColor=1A7F45)
 
 <img src="docs/screenshots/01-home.png" alt="Hexward home screen" width="860">
 
@@ -30,15 +30,15 @@ and covers attacks Defender wasn't built for, like weaponized shortcuts, ClickFi
 | | |
 |---|---|
 | **Scans** | Quick, System, Full, or Custom (tick any drives, add any folders or projects, scan them together) |
-| **Looks inside** | ZIP and everything built on it (Office, JAR, APK, MSIX), 7z, GZIP, TAR, ISO disk images, Office macros, files embedded in documents, nested 3 levels deep |
-| **Detects** | 5,100+ community YARA rules, known-bad hashes, the EICAR test file, Windows file-name tricks, disguised programs, shortcut droppers, macro droppers, script droppers, HTML and SVG smuggling, ClickFix pages, zip bombs |
-| **Guards in real time** | File, process, ClickFix and stealer shields: new downloads, every program that starts, commands copied from websites, and anything that opens your browser passwords or wallets. Confirmed threats are quarantined automatically (their process stopped first); suspicious finds always wait for you |
+| **Looks inside** | ZIP and everything built on it (Office, JAR, APK, MSIX), 7z, GZIP, TAR, CAB, RAR (file list and stored files), ISO, VHD/VHDX and IMG disk images, MSI installers, NSIS installers, PyInstaller programs, UPX-packed programs, Office macros, RTF objects, PDF scripts and attachments, OneNote attachments, nested 3 levels deep |
+| **Detects** | 5,100+ community YARA rules, known-bad hashes, ~3,000 vulnerable and malicious kernel drivers (LOLDrivers and Microsoft's blocklist), the EICAR test file, Windows file-name tricks, disguised programs, shortcut, macro, script and installer droppers (including obfuscated ones: split strings, character codes, reversed and nested base64), Equation Editor exploits, auto-running PDF scripts, HTML and SVG smuggling, ClickFix pages, zip bombs |
+| **Guards in real time** | File, process, script, ClickFix and stealer shields: new downloads, every program that starts and who started it, PowerShell/VBScript/JScript/macros as they run (AMSI), commands copied from websites, anything that opens your browser passwords or wallets, and new kernel drivers. Starts with Windows; goes quiet during games and presentations. Confirmed threats are quarantined automatically (their process stopped first); suspicious finds always wait for you |
 | **Fixes** | Quarantine (encrypted, always reversible), Delete forever (asks first), or Allow (trust that exact file). Startup items can be switched off and back on |
 | **Protects developers and AI agents** | Audits a project or GitHub repository before you install or open it, guards Claude Code's commands as they run, pins MCP servers, and keeps an eye on editor and browser extensions |
 | **Looks after the PC** | A startup manager (publisher, signature, size, search), a task manager that sorts programs into Apps, Background and Windows and won't let you end Windows or your security software, and a cleaner for browser caches, history, cookies and Windows junk |
 | **Stays honest** | Signed software is never quarantined on a pattern alone. Suspicious isn't the same as confirmed, and the app shows the difference |
 | **Stays fast** | A scan cache skips files a previous scan found clean with the same rules, so daily scans only read what changed |
-| **Updates itself** | Signed releases from GitHub; every update's signature is checked before it installs |
+| **Updates itself** | Signed releases from GitHub; every update's signature is checked before it installs. Rule packs come through a signed, staged channel with rollback and a kill switch |
 
 <div align="center">
 <img src="docs/screenshots/04-scan-threat-flash.png" alt="A scan in progress finding a threat" width="49%">
@@ -127,7 +127,11 @@ reported with its full path.
 The shields run in user mode (no kernel driver, no admin rights, no paid certificates):
 
 - **File shield:** watches Downloads, Desktop and both Startup folders. A new or changed file is scanned once it stops changing, so half-finished downloads are left alone.
-- **Process shield:** every program that starts is scanned; each program file is checked once until it changes.
+- **Process shield:** every program that starts is scanned; each program file is checked once until it changes. It also looks at who started it: Word, Excel, Outlook or a PDF reader starting PowerShell or a script host, a browser starting mshta or regsvr32, `regsvr32 /i:http`, `certutil -urlcache`, hidden encoded PowerShell. Clear-cut chains are stopped.
+- **Script shield (AMSI):** PowerShell, VBScript, JScript and Office macros are checked as they run, after Windows has decoded them. A small provider DLL hands each script to Hexward; if Hexward doesn't answer in 3 seconds the script runs as normal, so it can never make PowerShell hang. Turning it on needs administrator approval once (the DLL goes into Program Files so it can't be swapped).
+- **Download marks:** files unpacked from a downloaded archive get Windows' "from the internet" mark back (many archive tools drop it), so SmartScreen and Office's Protected View still warn.
+- **Driver watch:** a new kernel driver is reported with its publisher and signature, and checked against ~3,000 known vulnerable and malicious drivers (the "bring your own vulnerable driver" trick ransomware uses to switch off security software).
+- **Background and quiet:** Hexward starts with Windows in the notification area (no admin rights). During full-screen games, videos and presentations notifications wait and scans pause; shields and quiet-time scans run at background CPU and disk priority.
 - **ClickFix shield:** watches what gets copied. A command that downloads and runs code is flagged; a clear-cut "verify you're human" lure (download + run + a hidden window, encoded command or fake verification comment) is replaced on the clipboard, so pasting it into Win+R does nothing. It also checks your Win+R history for lures pasted in the past. Real install commands (like Scoop's) only get a warning.
 - **Stealer shield:** asks Windows which programs have browser passwords and cookies (Chrome, Edge, Brave, Vivaldi, Opera, Yandex, Firefox), Discord and Telegram sessions, or crypto wallets (Exodus, Electrum, Atomic) open, and flags anything that isn't the app that owns them. Unsigned programs running from Temp or Downloads are stopped and quarantined automatically; signed ones only raise a warning.
 - **What happens on a hit:** a confirmed threat is quarantined automatically, and its process is stopped first. Suspicious finds are reported and left in place. Automatic quarantine can be switched off in Settings.
@@ -179,6 +183,7 @@ target\release\hexward-app.exe
 
 ```bash
 hexward update                          # download rule packs
+hexward update --rollback               # go back to the previous rule pack
 hexward scan                            # quick scan
 hexward scan D:\Downloads E:\           # any files, folders or drives
 hexward scan --full                     # every fixed drive
@@ -208,8 +213,11 @@ Exit codes: `0` nothing found, `1` threats found, `2` error.
 | YARA Forge core (default) | [YARAHQ/yara-forge](https://github.com/YARAHQ/yara-forge) | none | ~5,100 tested community rules |
 | YARA Forge extended / full | same | none | more rules, more noise |
 | MalwareBazaar hashes | [bazaar.abuse.ch](https://bazaar.abuse.ch) | free [Auth-Key](https://auth.abuse.ch) in `HEXWARD_ABUSECH_KEY` | SHA-256 of fresh malware, kept and grown on every update |
+| Driver blocklist | [LOLDrivers](https://www.loldrivers.io) and [Microsoft's vulnerable driver blocklist](https://learn.microsoft.com/windows/security/application-security/application-control/app-control-for-business/design/microsoft-recommended-driver-block-rules) | none | file and Authenticode hashes of vulnerable and malicious drivers |
 
-A new pack replaces the old one only after it compiles, so a failed update never leaves you with fewer rules.
+**The rule channel.** The core pack arrives through Hexward's own channel (the `rules-channel` release): a daily workflow takes each new YARA Forge pack, runs it through the false-alarm gate, signs it with the release key and rolls it out in stages (5% of installs, then 25% after a day, everyone after two). A pack can be withdrawn at once with the kill switch, and installs that have it go back to the last good one. `hexward update --rollback` goes back to the previous pack by hand.
+
+A new pack replaces the old one only after it compiles (and, from the channel, only after its signature checks), so a failed update never leaves you with fewer rules.
 You can also drop your own `*.yar` rules, `*.txt`/`*.csv` hash lists and a `disabled.txt` into that folder.
 
 ## Updates and releases
@@ -239,7 +247,8 @@ flowchart LR
 
 - No account, no telemetry, no analytics.
 - Scans, history, quarantine and settings stay in `%LOCALAPPDATA%\Hexward`.
-- Network use: rule downloads (GitHub, abuse.ch), the update check (GitHub API), and, only when you tick **Check online** in a project audit, package names and versions sent to OSV.dev, npm and PyPI. Nothing else.
+- Network use: rule and blocklist downloads (GitHub, abuse.ch, loldrivers.io, Microsoft), the update check (GitHub API), and, only when you tick **Check online** in a project audit, package names and versions sent to OSV.dev, npm and PyPI. Nothing else.
+- The script shield's pipe only accepts connections from this PC, and scripts never leave it.
 - Any future cloud features will be opt-in and send only hash prefixes. See [docs/STRATEGY.md](docs/STRATEGY.md).
 
 ## Project layout
@@ -252,7 +261,8 @@ crates/engine    scanning core: hashes, YARA-X, heuristics, containers, Office, 
 crates/cli       the hexward command
 crates/app       the desktop app (Slint): screens, tray, notifications, self-update
 crates/update    rule packs (YARA Forge, MalwareBazaar) and signed app updates
-crates/release   signing tool for the release pipeline
+crates/release   signing tool for the release pipeline and the rule channel
+crates/amsi      the AMSI provider DLL (hands scripts to the app over a local pipe)
 rules/           built-in test rules, test hash, disabled-rule list
 assets/brand     logos (generated from the pixel grids by scripts/brand-assets.js)
 docs/            strategy and research, screenshots
@@ -261,7 +271,7 @@ docs/            strategy and research, screenshots
 ## Testing
 
 ```bash
-cargo test --workspace      # 92 tests
+cargo test --workspace      # 123 tests
 cargo clippy --workspace --all-targets -- -D warnings
 target\debug\hexward-app.exe --shots docs\screenshots   # renders every screen to PNG
 ```
@@ -280,9 +290,9 @@ alarms and honesty, and protecting developers and AI coding agents, which nobody
 The full plan, with the research behind it, is in [ROADMAP.md](ROADMAP.md) and [docs/STRATEGY.md](docs/STRATEGY.md).
 
 **Next:**
-- an AMSI provider so PowerShell, VBScript and macros are checked as they run
+- Inno Setup unpacking, and RAR's compressed entries (the official unRAR code isn't GPL-compatible)
+- the first published head-to-head benchmark (method in [docs/BENCHMARK.md](docs/BENCHMARK.md))
 - release anomalies in dependencies: sudden version jumps, 10× size growth, releases without a git tag
-- more formats: RAR, CAB, MSI, NSIS/Inno installers, OneNote, PDF JavaScript
 
 ## Credits
 

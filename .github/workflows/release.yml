@@ -90,9 +90,17 @@ jobs:
           }
           exit 0
 
+      # Popular installers and game launchers, fresh from their official sources: packed
+      # installers are where antivirus false alarms happen.
+      - name: Clean installers gate
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ./scripts/clean-corpus.ps1 -Hexward ./target/release/hexward.exe
+
       - name: Build
         if: steps.v.outputs.exists == 'false'
-        run: cargo build --release --locked -p hexward-app -p hexward -p hexward-release
+        run: cargo build --release --locked -p hexward-app -p hexward -p hexward-release -p hexward-amsi
 
       - name: Sign
         if: steps.v.outputs.exists == 'false'
@@ -103,10 +111,11 @@ jobs:
           if [ -z "$HEXWARD_SIGNING_KEY" ]; then echo "::error::HEXWARD_SIGNING_KEY secret is missing; refusing to publish an unsigned release"; exit 1; fi
           v="${{ steps.v.outputs.version }}"
           mkdir dist
-          cp target/release/hexward-app.exe target/release/hexward.exe dist/
+          cp target/release/hexward-app.exe target/release/hexward.exe target/release/hexward_amsi.dll dist/
           ./target/release/hexward-release.exe sign dist/hexward-app.exe --version "$v"
           ./target/release/hexward-release.exe sign dist/hexward.exe --version "$v"
-          (cd dist && sha256sum hexward-app.exe hexward.exe > SHA256SUMS.txt)
+          ./target/release/hexward-release.exe sign dist/hexward_amsi.dll --version "$v"
+          (cd dist && sha256sum hexward-app.exe hexward.exe hexward_amsi.dll > SHA256SUMS.txt)
 
       - name: Release notes
         if: steps.v.outputs.exists == 'false'
@@ -124,5 +133,5 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           v="${{ steps.v.outputs.version }}"
-          gh release create "v$v" dist/hexward-app.exe dist/hexward-app.exe.sig dist/hexward.exe dist/hexward.exe.sig dist/SHA256SUMS.txt \
+          gh release create "v$v" dist/hexward-app.exe dist/hexward-app.exe.sig dist/hexward.exe dist/hexward.exe.sig dist/hexward_amsi.dll dist/hexward_amsi.dll.sig dist/SHA256SUMS.txt \
             --title "Hexward $v" --notes-file notes.md --target "$GITHUB_SHA"

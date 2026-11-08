@@ -97,7 +97,7 @@ fn run_admin_if_needed(tool: &str, args: &[&str]) -> Result<(), String> {
 
 /// Runs a program elevated and waits for it. Returns its exit code, or None if the user said no.
 #[cfg(windows)]
-fn run_elevated(tool: &str, args: &[&str]) -> Option<u32> {
+pub fn run_elevated(tool: &str, args: &[&str]) -> Option<u32> {
     use windows_sys::Win32::Foundation::CloseHandle;
     use windows_sys::Win32::System::Threading::{GetExitCodeProcess, INFINITE, WaitForSingleObject};
     use windows_sys::Win32::UI::Shell::{SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW, ShellExecuteExW};

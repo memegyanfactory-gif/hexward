@@ -25,6 +25,8 @@ pub struct Engine {
     /// SHA-256 of files the user chose to trust.
     allowed: std::sync::RwLock<HashSet<[u8; 32]>>,
     fingerprint: u64,
+    /// Vulnerable and malicious kernel drivers (LOLDrivers, Microsoft blocklist).
+    drivers: crate::drivers::DriverDb,
 }
 
 #[derive(Debug, Clone)]
@@ -37,11 +39,13 @@ pub struct ScanOptions {
     pub excludes: Vec<PathBuf>,
     /// Skip files already found clean by this rule set (see cache.rs).
     pub cache: Option<std::sync::Arc<crate::cache::ScanCache>>,
+    /// Background CPU and disk priority, so the PC stays responsive (scheduled scans, quiet mode).
+    pub low_priority: bool,
 }
 
 impl Default for ScanOptions {
     fn default() -> Self {
-        ScanOptions { max_size: 64 * 1024 * 1024, threads: 0, excludes: Vec::new(), cache: None }
+        ScanOptions { max_size: 64 * 1024 * 1024, threads: 0, excludes: Vec::new(), cache: None, low_priority: false }
     }
 }
 
@@ -154,6 +158,13 @@ impl Engine {
             files.sort();
             for file in files {
                 let ext = file.extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase();
+                if file.file_name().is_some_and(|n| n == "drivers.json") {
+                    // A new driver list must invalidate the scan cache too.
+                    if let Ok(b) = std::fs::read(&file) {
+                        fp = fnv(&b, fp);
+                    }
+                    continue;
+                }
                 if !matches!(ext.as_str(), "yar" | "yara" | "txt" | "csv") {
                     continue;
                 }
@@ -176,10 +187,16 @@ impl Engine {
             disabled,
             allowed: std::sync::RwLock::new(crate::allowlist::hashes()),
             fingerprint: fp,
+            drivers: crate::drivers::DriverDb::load(extra_dirs),
         })
     }
 
     /// Identifies this exact rule set; the scan cache is tied to it.
+    /// The driver blocklist this engine checks against.
+    pub fn drivers(&self) -> &crate::drivers::DriverDb {
+        &self.drivers
+    }
+
     pub fn fingerprint(&self) -> u64 {
         self.fingerprint
     }
@@ -280,6 +297,25 @@ impl Engine {
                 break;
             }
         }
+        for note in &ex.notes {
+            match note {
+                Note::Finding { name, severity, text, entry } => {
+                    let mut d = Detection::new(name.clone(), *severity, crate::Source::Heuristic, text.clone());
+                    d.inner = Some(at(entry.as_deref().unwrap_or(format.name())));
+                    if !found.iter().any(|f| f.name == d.name && f.inner == d.inner) {
+                        found.push(d);
+                    }
+                }
+                // Listed but not unpacked: the name alone can still give it away.
+                Note::Listed { entry } => {
+                    for mut d in heuristics::name_checks(Path::new(entry)) {
+                        d.inner = Some(at(entry));
+                        found.push(d);
+                    }
+                }
+                _ => {}
+            }
+        }
         let locked: Vec<&String> = ex.notes.iter().filter_map(|n| if let Note::Encrypted { entry } = n { Some(entry) } else { None }).collect();
         if let Some(hidden) = locked.iter().find(|e| heuristics::is_runnable_name(e)) {
             let mut d = Detection::new(
@@ -329,6 +365,9 @@ impl Engine {
                 crate::Source::Hash,
                 "This exact file is on Hexward's list of known threats.",
             ));
+        }
+        if let Some(d) = self.drivers.check(data, digest) {
+            found.push(d);
         }
         if eicar::is_eicar(data, &self.eicar) {
             found.push(eicar::detection());
@@ -407,7 +446,11 @@ impl Engine {
             let workers: Vec<_> = (0..threads)
                 .map(|_| {
                     let rx = rx.clone();
+                    let low = opts.low_priority;
                     scope.spawn(move || {
+                        if low {
+                            crate::perf::background_thread();
+                        }
                         let mut scanner = self.rules.scanner();
                         let mut local = Vec::new();
                         let mut seen: u64 = 0;
@@ -495,12 +538,20 @@ impl Engine {
 
 /// A pattern rule alone never quarantines signed software: if a confirmed rule hit lands on a
 /// file with a valid signature, it is downgraded to suspicious. Hash and EICAR hits stay confirmed.
-fn trust_signed(path: &Path, detections: &mut [Detection]) -> Option<bool> {
-    if !detections.iter().any(|d| d.source == crate::Source::Rule) {
+/// A script heuristic is an educated guess about what the code does.
+fn script_guess(d: &Detection) -> bool {
+    d.source == crate::Source::Heuristic && d.name.starts_with("Suspicious/Script.")
+}
+
+fn trust_signed(path: &Path, detections: &mut Vec<Detection>) -> Option<bool> {
+    if !detections.iter().any(|d| d.source == crate::Source::Rule || script_guess(d)) {
         return None;
     }
-    let signed = crate::sig::has_valid_signature(path);
+    let signed = crate::sig::is_signed(path);
     if signed {
+        // A validly signed script (Microsoft's own modules download and install things) isn't
+        // reported on a guess about its behavior.
+        detections.retain(|d| !script_guess(d));
         for d in detections.iter_mut().filter(|d| d.source == crate::Source::Rule) {
             d.source = crate::Source::SuspiciousRule;
             d.description.push_str(" The file has a valid digital signature, so Hexward reports it but won't quarantine it on its own.");

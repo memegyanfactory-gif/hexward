@@ -4,6 +4,19 @@ Each `## version` section becomes the release notes and the first line shows in 
 
 ## 0.3.0
 
+- Looks inside more: RTF objects (Equation Editor exploits), PDF scripts, launch actions and attachments, OneNote attachments, CAB, RAR (names and stored files), MSI, NSIS installers, PyInstaller programs, UPX-packed programs, and VHD/VHDX/IMG disk images
+- Sees through script obfuscation: split strings, escape characters, character codes, reversed text, nested and compressed base64
+- Script shield (AMSI): PowerShell, VBScript, JScript and Office macros checked as they run
+- Process shield now catches suspicious chains: Office or a browser starting script tools, regsvr32/mshta/certutil tricks, hidden encoded PowerShell
+- Vulnerable and malicious kernel drivers (LOLDrivers and Microsoft's blocklist), and an alert for every new driver
+- Files unpacked from downloaded archives get their "from the internet" mark back
+- Starts with Windows in the notification area; quiet mode for games and presentations; background-priority scanning
+- Signed, staged rule channel with rollback and a kill switch (`hexward update --rollback`)
+- Microsoft's own catalog-signed scripts and programs are recognized as signed
+- Release gate now also scans 16 popular installers and game launchers fetched fresh
+
+## 0.2.0
+
 - Dev & AI protection: audit a project or GitHub repository for supply-chain and AI-agent traps before you install or open it
 - Finds install-time code, poisoned Claude Code and VS Code configs, prompt injection, hidden Unicode, risky GitHub Actions and leaked keys (also in git history)
 - Optional online check: known-malware package versions (OSV.dev) and package names that don't exist (slopsquatting)
@@ -11,13 +24,10 @@ Each `## version` section becomes the release notes and the first line shows in 
 - MCP server pinning: new or changed servers wait for your approval
 - Extension inventory for editors and browsers, with risky permissions, hidden-code checks and changes since last time
 - `hexward audit`, `hexward guard` and `hexward extensions` commands
-
-## 0.2.0
-
-- PC care: a cleaner, a task manager and a better startup manager
 - Cleaner: finds your browsers and shows their icons; tick cache, history or cookies per browser, plus temp files, crash dumps, thumbnail and shader caches and the Recycle Bin. Sizes are shown before anything is deleted, bookmarks and passwords are never touched, files in use are skipped
 - Task manager: programs grouped into Apps, Background and Windows with icons, publishers, CPU and memory; Windows and security processes are locked; scan, open the folder or end a program after a confirm step; unsigned programs in Temp or Downloads are highlighted
 - Startup manager: publisher, signature status, size and icon for each entry, with search and sorting; third-party scheduled tasks and services can be switched off and back on (admin asked only when needed)
+- PC care: a cleaner, a task manager and a better startup manager
 
 ## 0.1.1
 

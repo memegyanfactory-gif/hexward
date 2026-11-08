@@ -35,13 +35,15 @@ here is what updates the page.
 - [x] Web: HTML/SVG smuggling, SVG phishing redirects, ClickFix pages, .url WebDAV tricks
 - [x] Scan cache tied to the rule-set fingerprint
 - [x] False-alarm gate in the release pipeline (System32 + Program Files with the real rules)
-- [ ] RTF, PDF JavaScript, OneNote attachments
-- [ ] RAR, CAB, VHD/VHDX, IMG/UDF
-- [ ] MSI, MSIX manifests, NSIS and Inno Setup installers, UPX, PyInstaller
-- [ ] Deeper script de-obfuscation (string building, char-code arrays, nested encodings)
-- [ ] Signed, staged rule packs: canary → 10% → 100%, rollback, kill switch
-- [ ] Bigger clean corpus for the gate: NSRL Modern sets, top winget installers, popular games
-- [ ] Head-to-head benchmark against KicomAV and ClamAV in a VM, results published
+- [x] RTF objects (Equation Editor exploits), PDF JavaScript/launch actions/attachments, OneNote attachments
+- [x] CAB, RAR (file names and stored files), VHD/VHDX, IMG/UDF (programs carved from the image)
+- [x] MSI (embedded cabinets and custom-action programs), MSIX startup scripts, NSIS installers, UPX (NRV2B/2D/2E, LZMA), PyInstaller
+- [ ] Inno Setup unpacking, and compressed RAR entries (unRAR isn't GPL-compatible; needs our own decoder)
+- [x] Deeper script de-obfuscation (split strings, escapes, char-code arrays, reversed text, nested and compressed base64)
+- [x] Signed, staged rule packs: 5% → 25% → 100%, rollback, kill switch (daily rule-channel workflow)
+- [x] Bigger clean corpus for the gate: 16 popular installers and game launchers fetched fresh every release
+- [ ] NSRL Modern sets in the gate (too large for the free CI runner today)
+- [~] Head-to-head benchmark against KicomAV and ClamAV in a VM, results published (harness and method ready; VM run pending)
 
 ## Phase 2 · Real-time protection (user mode)
 
@@ -51,12 +53,13 @@ here is what updates the page.
 - [x] ClickFix shield: scores copied commands, replaces clear-cut lures on the clipboard
 - [x] Run-dialog (Win+R) history check for past ClickFix commands
 - [x] Stealer shield: flags non-owners opening browser, Discord, Telegram and wallet secrets (Restart Manager)
-- [ ] Background service so shields run without the app open
-- [ ] AMSI provider: PowerShell, VBScript, JScript and macros checked as they run
-- [ ] Download watcher with Mark-of-the-Web; copy it onto files extracted from archives
-- [ ] Suspicious process chains (browser/Office starting mshta, wscript, powershell -enc, regsvr32 /i:http)
-- [ ] Vulnerable-driver blocklist (Microsoft list + LOLDrivers); alert on new kernel drivers
-- [ ] Quiet mode for games; low-priority scanning; performance budget (AV-Comparatives impact ≤ 10)
+- [x] Background protection: starts with Windows in the notification area, no admin rights
+- [x] AMSI provider: PowerShell, VBScript, JScript and macros checked as they run (fails open, Program Files only)
+- [x] Download watcher with Mark-of-the-Web; copy it onto files extracted from archives
+- [x] Suspicious process chains (browser/Office starting mshta, wscript, powershell -enc, regsvr32 /i:http)
+- [x] Vulnerable-driver blocklist (Microsoft list + LOLDrivers); alert on new kernel drivers
+- [x] Quiet mode for games and presentations; background-priority scanning
+- [ ] Performance budget confirmed by AV-Comparatives (impact score ≤ 10; needs the free lab series)
 
 ## Phase 2.5 · PC care (startup, tasks, cleanup)
 
@@ -101,7 +104,7 @@ Cleaner
 
 ## Phase 5 · Certification (free route)
 
-- [~] Our own update signing (Ed25519) and signed GitHub releases (first release building on GitHub)
+- [x] Our own update signing (Ed25519) and signed GitHub releases (first: v0.2.0)
 - [ ] Free Authenticode signing through the SignPath Foundation (open-source program)
 - [ ] EULA, privacy policy, published criteria for unwanted software
 - [ ] Internal AMTSO-style tests published

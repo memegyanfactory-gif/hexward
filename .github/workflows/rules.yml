@@ -1,0 +1,120 @@
+# Hexward rule channel: signed, staged rule packs.
+#
+# Every day: take the newest YARA Forge core pack. If it's new, run it through the false-alarm
+# gate (System32 and Program Files on this clean runner), sign it, and add it to the channel at
+# 5% of installs. Packs already in the channel move to 25% after a day and 100% after two.
+#
+# Kill switch: run this workflow by hand with "kill" set to a pack version. That pack is
+# withdrawn at once; installs that have it go back to the newest good pack.
+
+name: Rule channel
+
+on:
+  schedule:
+    - cron: "17 5 * * *"
+  workflow_dispatch:
+    inputs:
+      kill:
+        description: "Pack version to withdraw (kill switch), e.g. 2026.11.08-0517"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+concurrency:
+  group: rules-channel
+  cancel-in-progress: false
+
+jobs:
+  channel:
+    runs-on: windows-latest
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Rust toolchain
+        shell: bash
+        run: rustup toolchain install stable --profile minimal && rustup default stable
+
+      - name: Cache Rust build
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: rust-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: rust-${{ runner.os }}-
+
+      - name: Build
+        run: cargo build --release --locked -p hexward -p hexward-release
+
+      - name: Current channel
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p chan
+          if gh release view rules-channel -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release download rules-channel -R "$GITHUB_REPOSITORY" -p channel.json -D chan || true
+          else
+            gh release create rules-channel -R "$GITHUB_REPOSITORY" --prerelease --title "Hexward rule channel" \
+              --notes "Signed, staged rule packs. Hexward installs pick them up by themselves; nothing to download by hand."
+          fi
+
+      - name: Candidate pack
+        id: pack
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -UseBasicParsing -Uri "https://github.com/YARAHQ/yara-forge/releases/latest/download/yara-forge-rules-core.zip" -OutFile forge.zip
+          Expand-Archive forge.zip -DestinationPath forge -Force
+          $yar = Get-ChildItem forge -Recurse -Filter *.yar | Select-Object -First 1
+          Copy-Item $yar.FullName candidate.yar
+          $sha = (Get-FileHash candidate.yar -Algorithm SHA256).Hash.ToLower()
+          $known = (Test-Path chan/channel.json) -and ((Get-Content chan/channel.json -Raw) -match $sha)
+          $rules = (Select-String -Path candidate.yar -Pattern '^\s*(private\s+|global\s+)*rule\s' ).Count
+          "new=$(if ($known) { 'false' } else { 'true' })" >> $env:GITHUB_OUTPUT
+          "version=$((Get-Date).ToUniversalTime().ToString('yyyy.MM.dd-HHmm'))" >> $env:GITHUB_OUTPUT
+          "rules=$rules" >> $env:GITHUB_OUTPUT
+          Write-Host "candidate $sha, $rules rules, already in channel: $known"
+
+      # The candidate must stay silent on clean software before anyone gets it.
+      - name: False-alarm gate on the candidate
+        if: steps.pack.outputs.new == 'true'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $env:HEXWARD_HOME = Join-Path $env:RUNNER_TEMP "hexward-gate"
+          New-Item -ItemType Directory -Force (Join-Path $env:HEXWARD_HOME "rules") | Out-Null
+          Copy-Item candidate.yar (Join-Path $env:HEXWARD_HOME "rules\yara-forge.yar")
+          ./target/release/hexward.exe scan C:\Windows\System32 "C:\Program Files" --json --no-cache > fp.json
+          $s = (Get-Content fp.json -Raw | ConvertFrom-Json).summary
+          $confirmed = @($s.threats | Where-Object { @($_.detections | Where-Object { $_.source -in @('hash', 'rule', 'eicar') }).Count -gt 0 })
+          "## Rule-pack gate`n`n$($s.files_scanned) files · $($confirmed.Count) confirmed hits on clean software" | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY
+          foreach ($t in $confirmed) { "- ``$($t.detections[0].name)`` · $($t.path)" | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY }
+          if ($confirmed.Count -gt 0) { Write-Host "::error::The candidate pack hits clean software; it was not published."; exit 1 }
+          ./scripts/clean-corpus.ps1 -Hexward ./target/release/hexward.exe
+
+      - name: Stage, sign and publish
+        shell: bash
+        env:
+          HEXWARD_SIGNING_KEY: ${{ secrets.HEXWARD_SIGNING_KEY }}
+          GH_TOKEN: ${{ github.token }}
+          # Passed through the environment, never pasted into the script (no injection).
+          KILL: ${{ inputs.kill }}
+          NEW: ${{ steps.pack.outputs.new }}
+          VERSION: ${{ steps.pack.outputs.version }}
+          RULES: ${{ steps.pack.outputs.rules }}
+        run: |
+          if [ -z "$HEXWARD_SIGNING_KEY" ]; then echo "::error::HEXWARD_SIGNING_KEY secret is missing"; exit 1; fi
+          args=(channel --out out)
+          [ -f chan/channel.json ] && args+=(--current chan/channel.json)
+          [ "$NEW" = "true" ] && args+=(--pack candidate.yar --version "$VERSION" --rules "$RULES")
+          [ -n "$KILL" ] && args+=(--kill "$KILL")
+          ./target/release/hexward-release.exe "${args[@]}" | tee -a "$GITHUB_STEP_SUMMARY"
+          gh release upload rules-channel -R "$GITHUB_REPOSITORY" out/* --clobber

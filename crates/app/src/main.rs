@@ -6,6 +6,7 @@
 #[allow(dead_code)]
 mod art;
 mod cleanui;
+mod amsi;
 mod clipboard;
 mod devui;
 mod icons;
@@ -52,6 +53,12 @@ struct Settings {
     auto_quarantine: bool,
     /// Cleaner items the user ticked; None until they first change one (then defaults apply).
     cleaner_ticks: Option<Vec<String>>,
+    /// Start hidden in the notification area when Windows starts, so the shields always run.
+    start_with_windows: bool,
+    /// Hold notifications and pause scans during full-screen games, videos and presentations.
+    quiet_mode: bool,
+    /// Judge scripts the AMSI provider hands over (when it's installed).
+    script_shield: bool,
 }
 
 impl Default for Settings {
@@ -69,6 +76,9 @@ impl Default for Settings {
             stealer_shield: true,
             auto_quarantine: true,
             cleaner_ticks: None,
+            start_with_windows: true,
+            quiet_mode: true,
+            script_shield: true,
         }
     }
 }
@@ -157,6 +167,13 @@ struct State {
     next_app_check: Instant,
     window_visible: bool,
     shields: shields::Shields,
+    script_slot: Slot<(bool, Result<(), String>)>,
+    /// Why it's quiet time right now (full-screen game, presentation), if it is.
+    quiet: Option<&'static str>,
+    next_quiet_check: Instant,
+    quiet_paused_scan: bool,
+    /// Notifications held during quiet time.
+    held: Vec<String>,
     tasks: taskman::TaskMan,
     cleaner: cleanui::Cleaner,
     dev: devui::Dev,
@@ -290,7 +307,94 @@ fn toast(st: &mut State, ui: &AppWindow, state: &str, title: &str, text: &str) {
     ui.set_toast_visible(true);
     st.toast_until = Some(Instant::now() + Duration::from_millis(5000));
     if !st.window_visible || state == "alarm" {
-        notify(title, text);
+        // Quiet mode: hold everything except real threats until the game or presentation ends.
+        if st.quiet.is_some() && state != "alarm" {
+            st.held.push(title.to_string());
+        } else {
+            notify(title, text);
+        }
+    }
+}
+
+fn ui_busy_script(ui: &AppWindow) -> bool {
+    ui.get_script_shield_busy()
+}
+
+// ---------- background protection ----------
+
+const RUN_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
+
+/// Development builds (cargo's target folder) never register themselves to start with Windows.
+fn is_dev_build(exe: &Path) -> bool {
+    let p = exe.to_string_lossy().to_ascii_lowercase();
+    p.contains(r"\target\debug\") || p.contains(r"\target\release\")
+}
+
+/// Adds or removes the "start with Windows" entry (current user only, no admin needed).
+#[cfg(windows)]
+fn set_autostart(on: bool) -> Result<(), String> {
+    use winreg::RegKey;
+    use winreg::enums::{HKEY_CURRENT_USER, KEY_READ, KEY_SET_VALUE};
+    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    if on && is_dev_build(&exe) {
+        return Err("This is a development build, so it won't register itself to start with Windows.".into());
+    }
+    let key = RegKey::predef(HKEY_CURRENT_USER).open_subkey_with_flags(RUN_KEY, KEY_READ | KEY_SET_VALUE).map_err(|e| e.to_string())?;
+    if on {
+        key.set_value("Hexward", &format!("\"{}\" --background", exe.display())).map_err(|e| e.to_string())
+    } else {
+        match key.get_value::<String, _>("Hexward") {
+            Ok(_) => key.delete_value("Hexward").map_err(|e| e.to_string()),
+            Err(_) => Ok(()),
+        }
+    }
+}
+
+#[cfg(not(windows))]
+fn set_autostart(_on: bool) -> Result<(), String> {
+    Ok(())
+}
+
+/// Quiet mode: checked every few seconds from the timer.
+fn tick_quiet(st: &mut State, ui: &AppWindow) {
+    if Instant::now() < st.next_quiet_check {
+        return;
+    }
+    st.next_quiet_check = Instant::now() + Duration::from_secs(5);
+    let now = if st.settings.quiet_mode { hexward_engine::perf::quiet_reason() } else { None };
+    match (st.quiet, now) {
+        (None, Some(reason)) => {
+            st.quiet = Some(reason);
+            // Pause a running scan; it picks up where it left off afterwards.
+            if let Some(job) = st.scan.as_mut()
+                && !job.progress.paused.load(Ordering::Relaxed)
+            {
+                job.progress.paused.store(true, Ordering::Relaxed);
+                job.paused_at = Some(Instant::now());
+                st.quiet_paused_scan = true;
+                ui.set_paused(true);
+            }
+        }
+        (Some(_), None) => {
+            st.quiet = None;
+            if st.quiet_paused_scan {
+                st.quiet_paused_scan = false;
+                if let Some(job) = st.scan.as_mut() {
+                    job.progress.paused.store(false, Ordering::Relaxed);
+                    if let Some(t) = job.paused_at.take() {
+                        job.paused_total += t.elapsed();
+                    }
+                    ui.set_paused(false);
+                }
+            }
+            if !st.held.is_empty() {
+                let n = st.held.len();
+                let first = st.held.remove(0);
+                st.held.clear();
+                notify(&format!("{n} update{} while you were busy", if n == 1 { "" } else { "s" }), &if n == 1 { first } else { format!("{first}, and {} more. Open Hexward to see them.", n - 1) });
+            }
+        }
+        _ => {}
     }
 }
 
@@ -440,6 +544,20 @@ fn refresh_home(st: &State, ui: &AppWindow) {
             tone: if st.settings.stealer_shield { "safe".into() } else { "warn".into() },
         },
         StatusRow {
+            name: "Script shield".into(),
+            value: if amsi::is_registered() && st.settings.script_shield { "Checking scripts as they run".into() } else { "Off (one admin approval in Settings)".into() },
+            tone: if amsi::is_registered() && st.settings.script_shield { "safe".into() } else { "off".into() },
+        },
+        StatusRow {
+            name: "Background protection".into(),
+            value: match (st.settings.start_with_windows, st.quiet) {
+                (_, Some(why)) => format!("Quiet for {why}").into(),
+                (true, None) => "Starts with Windows".into(),
+                (false, None) => "Only while Hexward is open".into(),
+            },
+            tone: if st.settings.start_with_windows { "safe".into() } else { "warn".into() },
+        },
+        StatusRow {
             name: "App".into(),
             value: match &st.release {
                 Some(r) => format!("{} ready", r.version).into(),
@@ -495,6 +613,9 @@ fn refresh_settings(st: &State, ui: &AppWindow) {
     ui.set_max_size_mb(st.settings.max_size_mb as i32);
     ui.set_quarantine_suspicious(st.settings.quarantine_suspicious);
     ui.set_close_to_tray(st.settings.close_to_tray);
+    ui.set_start_with_windows(st.settings.start_with_windows);
+    ui.set_quiet_mode(st.settings.quiet_mode);
+    ui.set_script_shield(st.settings.script_shield && amsi::is_registered());
     ui.set_file_shield(st.settings.file_shield);
     ui.set_process_shield(st.settings.process_shield);
     ui.set_auto_quarantine(st.settings.auto_quarantine);
@@ -559,6 +680,8 @@ fn start_scan(st: &mut State, ui: &AppWindow, kind: &'static str) {
         // Never scan Hexward's own data: the rule files would match the rules.
         excludes: vec![data_dir(), Vault::default_dir()],
         cache: Some(Arc::new(hexward_engine::cache::ScanCache::open(hexward_engine::cache::ScanCache::default_path(), engine.fingerprint()))),
+        // On battery or with the window hidden, a scan shouldn't slow anything else down.
+        low_priority: !st.window_visible || hexward_engine::perf::on_battery(),
     };
     {
         let (progress, cancel, result) = (progress.clone(), cancel.clone(), result.clone());
@@ -1028,7 +1151,7 @@ fn check_startup(st: &mut State, ui: &AppWindow) {
                 let meta = match &item.target {
                     Some(t) if t.is_file() => StartupMeta {
                         publisher: hexward_engine::fileinfo::company(t),
-                        signed: hexward_engine::sig::has_valid_signature(t),
+                        signed: hexward_engine::sig::is_signed(t),
                         size: std::fs::metadata(t).map(|m| m.len()).unwrap_or(0),
                         icon: icons::file_icon(t),
                     },
@@ -1068,7 +1191,7 @@ fn finish_update(st: &mut State, ui: &AppWindow, r: Result<hexward_update::Repor
         Ok(rep) => {
             let mut lines = Vec::new();
             let mut ok = false;
-            for (name, step) in [("YARA Forge", &rep.yara_forge), ("MalwareBazaar", &rep.malwarebazaar)] {
+            for (name, step) in [("YARA Forge", &rep.yara_forge), ("MalwareBazaar", &rep.malwarebazaar), ("Driver blocklist", &rep.drivers)] {
                 match step {
                     Step::Updated { detail } => {
                         ok = true;
@@ -1235,6 +1358,21 @@ fn tick(st: &mut State, ui: &AppWindow) {
         st.toast_until = None;
         ui.set_toast_visible(false);
     }
+    tick_quiet(st, ui);
+    if let Some((on, r)) = take(&st.script_slot) {
+        ui.set_script_shield_busy(false);
+        match r {
+            Ok(()) => {
+                st.settings.script_shield = on;
+                st.settings.save();
+                st.shields.script_on.store(on, Ordering::Relaxed);
+                toast(st, ui, if on { "safe" } else { "warn" }, if on { "Script shield on" } else { "Script shield off" }, if on { "PowerShell, VBScript, JScript and Office macros are checked as they run. Open PowerShell windows pick it up when restarted." } else { "Scripts are no longer checked as they run." });
+            }
+            Err(e) => toast(st, ui, "warn", "Couldn't change the script shield", &e),
+        }
+        refresh_settings(st, ui);
+        refresh_home(st, ui);
+    }
     if st.flash_until.is_some_and(|t| Instant::now() > t) {
         st.flash_until = None;
         ui.set_flash(false);
@@ -1312,12 +1450,17 @@ fn main() -> Result<(), slint::PlatformError> {
         appupdate::cleanup_old(&exe);
     }
 
+    // Elevated helper runs (installing the script shield): do the job and exit, no window.
+    if let Some(code) = amsi::helper(&args) {
+        std::process::exit(code);
+    }
+    let background = args.iter().any(|a| a == "--background");
     let ui = AppWindow::new()?;
     set_assets(&ui);
     ui.set_version(env!("CARGO_PKG_VERSION").into());
 
     let settings = Settings::load();
-    let settings_shields = (settings.file_shield, settings.process_shield, settings.clickfix_shield, settings.stealer_shield, settings.auto_quarantine);
+    let settings_shields = (settings.file_shield, settings.process_shield, settings.clickfix_shield, settings.stealer_shield, settings.auto_quarantine, settings.script_shield);
     ui.global::<Theme>().set_dark(settings.dark);
     let threats = Rc::new(VecModel::<ThreatRow>::default());
     ui.set_threats(ModelRc::from(threats.clone()));
@@ -1351,8 +1494,13 @@ fn main() -> Result<(), slint::PlatformError> {
         app_check_slot: slot(),
         app_install_slot: slot(),
         next_app_check: Instant::now() + Duration::from_secs(6 * 3600),
-        window_visible: true,
-        shields: shields::Shields::start(settings_shields.0, settings_shields.1, settings_shields.2, settings_shields.3, settings_shields.4),
+        window_visible: !background,
+        quiet: None,
+        script_slot: slot(),
+        next_quiet_check: Instant::now(),
+        quiet_paused_scan: false,
+        held: Vec::new(),
+        shields: shields::Shields::start(settings_shields.0, settings_shields.1, settings_shields.2, settings_shields.3, settings_shields.4, settings_shields.5),
         tasks: taskman::TaskMan::new(),
         cleaner: cleanui::Cleaner::new(),
         dev: devui::Dev::new(),
@@ -1364,6 +1512,12 @@ fn main() -> Result<(), slint::PlatformError> {
         let mut s = st.borrow_mut();
         ui.set_tasks(s.tasks.model());
         load_engine(&mut s);
+        // Keep the start-with-Windows entry pointing at this copy (installed builds only).
+        if let Ok(exe) = std::env::current_exe()
+            && !is_dev_build(&exe)
+        {
+            let _ = set_autostart(s.settings.start_with_windows);
+        }
         refresh_vault(&s, &ui);
         refresh_home(&s, &ui);
         refresh_settings(&s, &ui);
@@ -1642,6 +1796,36 @@ fn main() -> Result<(), slint::PlatformError> {
         s.shields.auto_quarantine.store(v, Ordering::Relaxed);
         u.set_auto_quarantine(v);
     });
+    on!(on_set_start_with_windows, |s, u, v: bool| {
+        match set_autostart(v) {
+            Ok(()) => {
+                s.settings.start_with_windows = v;
+                s.settings.save();
+                u.set_start_with_windows(v);
+                refresh_home(s, &u);
+            }
+            Err(e) => toast(s, &u, "warn", "Couldn't change that", &e),
+        }
+    });
+    on!(on_set_script_shield, |s, u, v: bool| {
+        if ui_busy_script(&u) {
+            return;
+        }
+        u.set_script_shield_busy(true);
+        let out = s.script_slot.clone();
+        std::thread::spawn(move || {
+            // Already registered and only switching judging on/off? No admin prompt needed.
+            let r = if v == amsi::is_registered() { Ok(()) } else { amsi::set_enabled(v) };
+            if let Ok(mut g) = out.lock() {
+                *g = Some((v, r));
+            }
+        });
+    });
+    on!(on_set_quiet_mode, |s, u, v: bool| {
+        s.settings.quiet_mode = v;
+        s.settings.save();
+        u.set_quiet_mode(v);
+    });
     on!(on_set_close_to_tray, |s, u, v: bool| {
         s.settings.close_to_tray = v;
         s.settings.save();
@@ -1745,6 +1929,9 @@ fn main() -> Result<(), slint::PlatformError> {
         });
     }
 
-    ui.show()?;
+    // Started with Windows: protection runs, the window waits in the notification area.
+    if !background {
+        ui.show()?;
+    }
     slint::run_event_loop_until_quit()
 }

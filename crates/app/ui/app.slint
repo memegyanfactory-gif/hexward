@@ -788,6 +788,10 @@ export component AppWindow inherits Window {
     in property <int> max-size-mb: 64;
     in property <bool> quarantine-suspicious;
     in property <bool> close-to-tray: true;
+    in property <bool> start-with-windows: true;
+    in property <bool> quiet-mode: true;
+    in property <bool> script-shield;
+    in property <bool> script-shield-busy;
     in property <bool> file-shield: true;
     in property <bool> process-shield: true;
     in property <bool> auto-quarantine: true;
@@ -859,6 +863,9 @@ export component AppWindow inherits Window {
     callback set-max-size(string);
     callback set-quarantine-suspicious(bool);
     callback set-close-to-tray(bool);
+    callback set-start-with-windows(bool);
+    callback set-quiet-mode(bool);
+    callback set-script-shield(bool);
     callback set-file-shield(bool);
     callback set-process-shield(bool);
     callback set-auto-quarantine(bool);
@@ -1945,6 +1952,8 @@ export component AppWindow inherits Window {
                             Panel {
                                 VerticalLayout {
                                     SettingRow { title: "Dark theme"; text: "Ink background, easy on the eyes. Turn off for the light Paper theme."; Switch { checked: Theme.dark; toggled(v) => { root.set-dark(v); } } }
+                                    SettingRow { title: "Start with Windows"; text: "Hexward starts quietly in the notification area when you sign in, so the shields protect you even before you open it. No administrator rights needed."; Switch { checked: root.start-with-windows; toggled(v) => { root.set-start-with-windows(v); } } }
+                                    SettingRow { title: "Quiet mode for games and presentations"; text: "While a game or video is full screen or you're presenting, notifications wait and scans pause. Real threats still alert you."; Switch { checked: root.quiet-mode; toggled(v) => { root.set-quiet-mode(v); } } }
                                     SettingRow { title: "Keep running in the tray"; text: "Closing the window keeps Hexward in the notification area, so scans finish and alerts still reach you."; last: true; Switch { checked: root.close-to-tray; toggled(v) => { root.set-close-to-tray(v); } } }
                                 }
                             }
@@ -1954,6 +1963,7 @@ export component AppWindow inherits Window {
                                     SettingRow { title: "File shield"; text: root.shield-info; Switch { checked: root.file-shield; toggled(v) => { root.set-file-shield(v); } } }
                                     SettingRow { title: "Process shield"; text: "Checks every program the moment it starts. Each program file is checked once until it changes."; Switch { checked: root.process-shield; toggled(v) => { root.set-process-shield(v); } } }
                                     SettingRow { title: "ClickFix shield"; text: "Catches fake \"verify you're human\" pages that copy a command for you to paste. Clear-cut ones are replaced on the clipboard."; Switch { checked: root.clickfix-shield; toggled(v) => { root.set-clickfix-shield(v); } } }
+                                    SettingRow { title: "Script shield (AMSI)"; text: root.script-shield-busy ? "Waiting for Windows' administrator prompt…" : "Checks PowerShell, VBScript, JScript and Office macros as they run, after they're decoded. Turning it on asks for administrator approval once."; Switch { checked: root.script-shield; toggled(v) => { root.set-script-shield(v); } } }
                                     SettingRow { title: "Stealer shield"; text: "Alerts when a program that isn't your browser, Discord, Telegram or wallet opens their saved passwords, cookies or keys."; Switch { checked: root.stealer-shield; toggled(v) => { root.set-stealer-shield(v); } } }
                                     SettingRow {
                                         title: "Quarantine confirmed threats automatically";

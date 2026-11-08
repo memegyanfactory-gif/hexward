@@ -10,6 +10,7 @@
 //! leaves you with fewer rules than before.
 
 pub mod app;
+pub mod channel;
 pub mod online;
 
 use std::collections::BTreeMap;
@@ -85,6 +86,9 @@ pub struct ForgeInfo {
     pub created: Option<String>,
     pub forge_version: Option<String>,
     pub sha256: String,
+    /// Set when the pack came from Hexward's signed rule channel (its version).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub channel_version: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -99,6 +103,7 @@ pub struct Report {
     pub rules_dir: PathBuf,
     pub yara_forge: Step,
     pub malwarebazaar: Step,
+    pub drivers: Step,
 }
 
 #[derive(Serialize)]
@@ -174,7 +179,48 @@ pub fn run(pack: ForgePack, force: bool) -> Result<Report> {
     let mut manifest = read_manifest(&dir);
     let agent = agent();
 
-    let yara_forge = if pack == ForgePack::Off {
+    // The core pack comes from Hexward's signed, staged channel when it's available; the
+    // direct YARA Forge download is the fallback (and the source for the bigger packs).
+    let mut channel_note = String::new();
+    let from_channel = if pack == ForgePack::Core {
+        let current = manifest.yara_forge.as_ref().and_then(|f| f.channel_version.clone());
+        match channel::apply(&agent, &dir, FORGE_FILE, current.as_deref()) {
+            Ok(channel::Outcome::Installed(i)) => {
+                let raw = std::fs::read(dir.join(FORGE_FILE)).unwrap_or_default();
+                let src = String::from_utf8_lossy(&raw).into_owned();
+                use sha2::Digest;
+                manifest.yara_forge = Some(ForgeInfo {
+                    pack,
+                    url: format!("https://github.com/{}/releases/tag/{}", app::REPO, channel::CHANNEL_TAG),
+                    updated_at: Utc::now(),
+                    rules: i.rules,
+                    skipped: 0,
+                    created: header_field(&src, "Creation Date"),
+                    forge_version: header_field(&src, "YARA-Forge Version"),
+                    sha256: hex::encode(sha2::Sha256::digest(&raw)),
+                    channel_version: Some(i.version.clone()),
+                });
+                Some(Step::Updated { detail: format!("Hexward rule channel {}{}: {} rules, signed and checked for false alarms", i.version, if i.rolled_back { " (rolled back from a withdrawn pack)" } else { "" }, i.rules) })
+            }
+            Ok(channel::Outcome::UpToDate(v)) => Some(Step::Skipped { reason: format!("already on rule channel pack {v}") }),
+            Ok(channel::Outcome::RestoredPrevious) => {
+                if let Some(f) = manifest.yara_forge.as_mut() {
+                    f.channel_version = None;
+                }
+                Some(Step::Updated { detail: "the installed pack was withdrawn; the previous pack is back".into() })
+            }
+            Err(e) => {
+                channel_note = format!(" (rule channel: {e:#}; used YARA Forge directly)");
+                None
+            }
+        }
+    } else {
+        None
+    };
+
+    let yara_forge = if let Some(step) = from_channel {
+        step
+    } else if pack == ForgePack::Off {
         Step::Skipped { reason: "turned off with --yara off".into() }
     } else {
         match update_forge(&agent, &dir, pack) {
@@ -187,7 +233,7 @@ pub fn run(pack: ForgePack, force: bool) -> Result<Report> {
                     info.created.as_deref().map(|c| format!(", built {c}")).unwrap_or_default()
                 );
                 manifest.yara_forge = Some(info);
-                Step::Updated { detail }
+                Step::Updated { detail: format!("{detail}{channel_note}") }
             }
             Err(e) => Step::Failed { reason: format!("{e:#}. The previous rules are still in place") },
         }
@@ -218,7 +264,34 @@ pub fn run(pack: ForgePack, force: bool) -> Result<Report> {
     };
 
     std::fs::write(dir.join(MANIFEST), serde_json::to_vec_pretty(&manifest)?)?;
-    Ok(Report { rules_dir: dir, yara_forge, malwarebazaar })
+    let drivers = match update_drivers(&agent, &dir) {
+        Ok(n) => Step::Updated { detail: format!("{n} vulnerable or malicious drivers (LOLDrivers, Microsoft blocklist)") },
+        Err(e) => Step::Failed { reason: format!("{e:#}") },
+    };
+    Ok(Report { rules_dir: dir, yara_forge, malwarebazaar, drivers })
+}
+
+/// LOLDrivers and Microsoft's vulnerable driver blocklist → rules/drivers.json.
+/// Either source may fail on its own; the file is only replaced when at least one worked.
+fn update_drivers(agent: &ureq::Agent, dir: &Path) -> Result<usize> {
+    use hexward_engine::drivers::{parse_loldrivers, parse_ms_blocklist};
+    let mut all = Vec::new();
+    let mut errors = Vec::new();
+    match download(agent, "https://www.loldrivers.io/api/drivers.json", 200 * 1024 * 1024) {
+        Ok(b) => all.extend(parse_loldrivers(&b)),
+        Err(e) => errors.push(format!("LOLDrivers: {e}")),
+    }
+    match download(agent, "https://aka.ms/VulnerableDriverBlockList", 50 * 1024 * 1024).and_then(|z| unzip_first(&z, "driverpolicy_enforced.xml", 100 * 1024 * 1024).or_else(|_| unzip_first(&z, "sipolicy_enforced.xml", 100 * 1024 * 1024))) {
+        Ok(x) => all.extend(parse_ms_blocklist(&String::from_utf8_lossy(&x))),
+        Err(e) => errors.push(format!("Microsoft blocklist: {e}")),
+    }
+    if all.is_empty() {
+        bail!("{}", errors.join("; "));
+    }
+    let tmp = dir.join("drivers.json.new");
+    std::fs::write(&tmp, serde_json::to_vec(&all)?)?;
+    std::fs::rename(&tmp, dir.join("drivers.json"))?;
+    Ok(all.len())
 }
 
 fn update_forge(agent: &ureq::Agent, dir: &Path, pack: ForgePack) -> Result<ForgeInfo> {
@@ -238,6 +311,10 @@ fn update_forge(agent: &ureq::Agent, dir: &Path, pack: ForgePack) -> Result<Forg
         bail!("the new pack has no usable rules");
     }
 
+    let target = dir.join(FORGE_FILE);
+    if target.exists() {
+        std::fs::copy(&target, channel::previous_path(dir, FORGE_FILE))?;
+    }
     let tmp = dir.join(format!("{FORGE_FILE}.new"));
     std::fs::write(&tmp, &raw)?;
     std::fs::rename(&tmp, dir.join(FORGE_FILE))?;
@@ -252,7 +329,23 @@ fn update_forge(agent: &ureq::Agent, dir: &Path, pack: ForgePack) -> Result<Forg
         created: header_field(&src, "Creation Date"),
         forge_version: header_field(&src, "YARA-Forge Version"),
         sha256: hex::encode(sha2::Sha256::digest(&raw)),
+        channel_version: None,
     })
+}
+
+/// Puts the previous rule pack back (`hexward update --rollback`).
+pub fn rollback() -> Result<()> {
+    let dir = rules_dir();
+    if !channel::restore_previous(&dir, FORGE_FILE)? {
+        bail!("there's no previous rule pack to go back to");
+    }
+    let mut m = read_manifest(&dir);
+    if let Some(f) = m.yara_forge.as_mut() {
+        f.channel_version = None;
+        f.updated_at = Utc::now();
+    }
+    std::fs::write(dir.join(MANIFEST), serde_json::to_vec_pretty(&m)?)?;
+    Ok(())
 }
 
 fn update_bazaar(agent: &ureq::Agent, dir: &Path, key: &str) -> Result<BazaarInfo> {

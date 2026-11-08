@@ -114,6 +114,34 @@ pub fn check(current: &str) -> Result<Option<AppRelease>> {
     }))
 }
 
+/// Downloads one signed file (e.g. `hexward_amsi.dll`) from the latest release and checks its
+/// signature. Returns (release version, bytes).
+pub fn download_latest_asset(name: &str) -> Result<(String, Vec<u8>)> {
+    let url = format!("https://api.github.com/repos/{REPO}/releases/latest");
+    let mut resp = agent().get(&url).header("Accept", "application/vnd.github+json").call().map_err(|e| anyhow!("couldn't reach GitHub ({})", e.to_string().split(':').next().unwrap_or("network error")))?;
+    let body = resp.body_mut().with_config().limit(2 * 1024 * 1024).read_to_string()?;
+    let v: serde_json::Value = serde_json::from_str(&body).context("GitHub sent an unexpected answer")?;
+    let version = v["tag_name"].as_str().unwrap_or_default().trim_start_matches('v').to_string();
+    let assets = v["assets"].as_array().cloned().unwrap_or_default();
+    let link = |n: &str| assets.iter().find(|a| a["name"].as_str() == Some(n)).and_then(|a| a["browser_download_url"].as_str().map(String::from));
+    let file_url = link(name).ok_or_else(|| anyhow!("the latest release has no {name}"))?;
+    let sig_url = link(&format!("{name}.sig")).ok_or_else(|| anyhow!("{name} in the latest release isn't signed"))?;
+    let a = agent();
+    let fetch = |url: &str, limit: u64| -> Result<Vec<u8>> {
+        if !url.starts_with("https://github.com/") {
+            bail!("the download link doesn't point to GitHub");
+        }
+        let mut r = a.get(url).call().map_err(|e| anyhow!("download failed ({})", e.to_string().split(':').next().unwrap_or("error")))?;
+        let mut out = Vec::new();
+        r.body_mut().as_reader().take(limit).read_to_end(&mut out)?;
+        Ok(out)
+    };
+    let data = fetch(&file_url, 64 * 1024 * 1024)?;
+    let sig = String::from_utf8(fetch(&sig_url, 4096)?).map_err(|_| anyhow!("the signature file is damaged"))?;
+    verify(name, &version, &data, &sig, PUBLIC_KEY_HEX)?;
+    Ok((version, data))
+}
+
 /// Downloads the new app and checks its signature. Nothing touches the disk before that passes.
 pub fn download_verified(rel: &AppRelease) -> Result<Vec<u8>> {
     let a = agent();

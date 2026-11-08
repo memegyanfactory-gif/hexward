@@ -43,6 +43,10 @@ pub struct ShieldStats {
     pub programs_checked: AtomicU64,
     pub copies_checked: AtomicU64,
     pub stores_watched: AtomicU64,
+    /// Files extracted from downloads that got their "from the internet" mark back.
+    pub files_marked: AtomicU64,
+    /// Kernel drivers known (for the new-driver alert).
+    pub drivers_known: AtomicU64,
 }
 
 pub struct Shields {
@@ -53,6 +57,8 @@ pub struct Shields {
     pub clickfix_on: Arc<AtomicBool>,
     pub stealer_on: Arc<AtomicBool>,
     pub auto_quarantine: Arc<AtomicBool>,
+    /// Script shield (AMSI): judge scripts the provider DLL hands over.
+    pub script_on: Arc<AtomicBool>,
     pub stats: Arc<ShieldStats>,
     pub watched: Vec<PathBuf>,
     _watcher: Option<notify::RecommendedWatcher>,
@@ -91,7 +97,7 @@ fn file_key(p: &Path) -> Option<u64> {
 }
 
 impl Shields {
-    pub fn start(file_on: bool, process_on: bool, clickfix_on: bool, stealer_on: bool, auto_quarantine: bool) -> Self {
+    pub fn start(file_on: bool, process_on: bool, clickfix_on: bool, stealer_on: bool, auto_quarantine: bool, script_on: bool) -> Self {
         let engine: Arc<RwLock<Option<Arc<Engine>>>> = Arc::new(RwLock::new(None));
         let events = Arc::new(Mutex::new(Vec::new()));
         let file_on = Arc::new(AtomicBool::new(file_on));
@@ -132,6 +138,7 @@ impl Shields {
             std::thread::Builder::new()
                 .name("file-shield".into())
                 .spawn(move || {
+                    hexward_engine::perf::background_thread();
                     let mut last: HashMap<PathBuf, u64> = HashMap::new();
                     loop {
                         std::thread::sleep(Duration::from_millis(400));
@@ -160,11 +167,20 @@ impl Shields {
                             if last.len() > 100_000 {
                                 last.clear();
                             }
+                            // Extracted from a downloaded archive without the "from the internet" mark?
+                            // Put the mark back, so Windows and Office warn as they should.
+                            if hexward_engine::motw::propagate(&path).is_some() {
+                                stats.files_marked.fetch_add(1, Ordering::Relaxed);
+                            }
                             let mut scanner = eng.rules().scanner();
                             if let Ok(Some(report)) = eng.scan_file(&mut scanner, &path, MAX_SIZE) {
                                 stats.files_checked.fetch_add(1, Ordering::Relaxed);
                                 if !report.detections.is_empty() {
-                                    let ev = act(report, "File shield", auto.load(Ordering::Relaxed), None);
+                                    let origin = hexward_engine::motw::read(&path).and_then(|m| m.host_url.or(m.referrer_url));
+                                    let mut ev = act(report, "File shield", auto.load(Ordering::Relaxed), None);
+                                    if let Some(o) = origin {
+                                        ev.action.push_str(&format!(" It was downloaded from {}.", hexward_engine::audit::snippet(&o, 90)));
+                                    }
                                     if let Ok(mut e) = events.lock() {
                                         e.push(ev);
                                     }
@@ -183,21 +199,44 @@ impl Shields {
                 .name("process-shield".into())
                 .spawn(move || {
                     use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
+                    hexward_engine::perf::background_thread();
                     let Ok(mut sys) = System::new() else { return };
                     let mut seen_pids: HashSet<sysinfo::Pid> = HashSet::new();
                     let mut checked: HashSet<u64> = HashSet::new();
                     let me = std::process::id();
+                    let mut first = true;
                     loop {
-                        std::thread::sleep(Duration::from_secs(2));
+                        // Every second: short-lived droppers (mshta, regsvr32) are gone within a few.
+                        std::thread::sleep(Duration::from_secs(1));
                         if !process_on.load(Ordering::Relaxed) {
                             continue;
                         }
                         let Some(eng) = engine.read().ok().and_then(|e| e.clone()) else { continue };
-                        sys.refresh_processes_specifics(ProcessesToUpdate::All, true, ProcessRefreshKind::nothing().with_exe(UpdateKind::OnlyIfNotSet));
+                        sys.refresh_processes_specifics(ProcessesToUpdate::All, true, ProcessRefreshKind::nothing().with_exe(UpdateKind::OnlyIfNotSet).with_cmd(UpdateKind::OnlyIfNotSet));
                         let alive: HashSet<sysinfo::Pid> = sys.processes().keys().copied().collect();
                         for (pid, proc_) in sys.processes() {
                             if seen_pids.contains(pid) || pid.as_u32() == me {
                                 continue;
+                            }
+                            // Who started it, and how (skipped on the first pass: those were already running).
+                            if !first && let Some(parent) = proc_.parent().and_then(|pp| sys.process(pp)) {
+                                let cmd = proc_.cmd().iter().map(|a| a.to_string_lossy()).collect::<Vec<_>>().join(" ");
+                                let child = proc_.name().to_string_lossy();
+                                if let Some(v) = hexward_engine::chains::judge(&parent.name().to_string_lossy(), &child, &cmd) {
+                                    let high = v.severity == hexward_engine::Severity::High;
+                                    let stopped = high && auto.load(Ordering::Relaxed) && proc_.kill();
+                                    push(
+                                        &events,
+                                        ShieldEvent {
+                                            shield: "Process shield",
+                                            report: None,
+                                            title: format!("{} started {}", parent.name().to_string_lossy(), child),
+                                            action: format!("{}{}", v.reason, if stopped { " Hexward stopped it." } else { " Hexward let it run; end it in Tasks if you didn't expect it." }),
+                                            quarantined: false,
+                                            neutralize: false,
+                                        },
+                                    );
+                                }
                             }
                             let Some(exe) = proc_.exe() else { continue };
                             let Some(key) = file_key(exe) else { continue };
@@ -217,9 +256,78 @@ impl Shields {
                             }
                         }
                         seen_pids = alive;
+                        first = false;
                         if checked.len() > 50_000 {
                             checked.clear();
                         }
+                    }
+                })
+                .ok();
+        }
+
+        // ---- script shield: the AMSI provider's pipe ----
+        let script_on = Arc::new(AtomicBool::new(script_on));
+        {
+            let (engine, events, on) = (engine.clone(), events.clone(), script_on.clone());
+            std::thread::Builder::new().name("script-shield".into()).spawn(move || crate::amsi::serve(engine, on, events)).ok();
+        }
+
+        // ---- driver watch: alert when a new kernel driver is installed ----
+        {
+            let (engine, events, process_on, stats) = (engine.clone(), events.clone(), process_on.clone(), stats.clone());
+            std::thread::Builder::new()
+                .name("driver-watch".into())
+                .spawn(move || {
+                    hexward_engine::perf::background_thread();
+                    let seen_path = data_dir().join("drivers-seen.json");
+                    let mut seen: HashSet<String> = std::fs::read(&seen_path).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
+                    let first_run = seen.is_empty();
+                    loop {
+                        let Some(eng) = engine.read().ok().and_then(|e| e.clone()) else {
+                            std::thread::sleep(Duration::from_secs(5));
+                            continue;
+                        };
+                        if process_on.load(Ordering::Relaxed) {
+                            let now = hexward_engine::drivers::installed_drivers();
+                            stats.drivers_known.store(now.len() as u64, Ordering::Relaxed);
+                            let mut changed = false;
+                            for (name, path) in &now {
+                                if !seen.insert(name.to_lowercase()) {
+                                    continue;
+                                }
+                                changed = true;
+                                if first_run {
+                                    continue; // the first look only records what's already there
+                                }
+                                let mut scanner = eng.rules().scanner();
+                                let report = eng.scan_file(&mut scanner, path, MAX_SIZE).ok().flatten();
+                                let signed = hexward_engine::sig::is_signed(path);
+                                let publisher = hexward_engine::fileinfo::company(path).unwrap_or_else(|| "unknown publisher".into());
+                                match report {
+                                    Some(r) if !r.detections.is_empty() => push(&events, act(r, "Driver watch", false, None)),
+                                    _ => push(
+                                        &events,
+                                        ShieldEvent {
+                                            shield: "Driver watch",
+                                            report: None,
+                                            title: format!("New kernel driver: {name}"),
+                                            action: format!(
+                                                "{} ({publisher}, {}). Drivers run inside Windows itself. If you just installed hardware or software that needs it, that's expected.",
+                                                path.display(),
+                                                if signed { "signed" } else { "NOT signed" }
+                                            ),
+                                            quarantined: false,
+                                            neutralize: false,
+                                        },
+                                    ),
+                                }
+                            }
+                            if changed && let Ok(b) = serde_json::to_vec(&seen) {
+                                let _ = std::fs::create_dir_all(data_dir());
+                                let _ = std::fs::write(&seen_path, b);
+                            }
+                        }
+                        std::thread::sleep(Duration::from_secs(60));
                     }
                 })
                 .ok();
@@ -296,6 +404,7 @@ impl Shields {
             std::thread::Builder::new()
                 .name("stealer-shield".into())
                 .spawn(move || {
+                    hexward_engine::perf::background_thread();
                     use hexward_engine::behavior::{ALWAYS_OK, credential_stores, process_path, processes_using};
                     let me = std::process::id();
                     let mut stores = credential_stores();
@@ -343,6 +452,7 @@ impl Shields {
             clickfix_on,
             stealer_on,
             auto_quarantine: auto,
+            script_on,
             stats,
             watched: list.into_iter().map(|(p, _)| p).collect(),
             _watcher: watcher,
@@ -396,7 +506,7 @@ fn file_event(shield: &'static str, report: FileReport, action: String, quaranti
 /// Stealer shield verdict for a process that opened another app's secrets.
 fn stealer_event(eng: &Engine, exe: &Path, app: &str, pid: u32, auto: bool) -> ShieldEvent {
     use hexward_engine::{Detection, Severity, Source};
-    let signed = hexward_engine::sig::has_valid_signature(exe);
+    let signed = hexward_engine::sig::is_signed(exe);
     let lower = exe.to_string_lossy().to_lowercase();
     // Where stealers run from: places any program can write without admin rights.
     let risky_place = ["\\appdata\\local\\temp\\", "\\downloads\\", "\\appdata\\roaming\\", "\\programdata\\", "\\users\\public\\"].iter().any(|p| lower.contains(p));

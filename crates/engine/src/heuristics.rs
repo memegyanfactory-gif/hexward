@@ -73,8 +73,31 @@ pub fn name_checks(path: &Path) -> Vec<Detection> {
 }
 
 /// Checks on the file contents.
+/// MSIX/AppX packages that run a script through the Package Support Framework when the app
+/// starts: legitimate packages almost never do, and 2024–2025 MSIX malware does exactly this.
+fn msix_psf_script(path: &Path, data: &[u8]) -> Option<Detection> {
+    let name = path.file_name()?.to_string_lossy().to_ascii_lowercase();
+    if name != "config.json" || data.len() > 1024 * 1024 {
+        return None;
+    }
+    let t = String::from_utf8_lossy(data).to_ascii_lowercase();
+    if !(t.contains("\"startscript\"") || t.contains("\"endscript\"")) || !t.contains("scriptpath") {
+        return None;
+    }
+    let hidden = t.contains("\"showwindow\": false") || t.contains("\"showwindow\":false");
+    Some(Detection::new(
+        "Suspicious/Msix.PsfScript!a",
+        if hidden { Severity::High } else { Severity::Medium },
+        Source::Heuristic,
+        format!("This app package runs a script{} through the Package Support Framework when it starts. Recent fake-installer malware hides its PowerShell this way.", if hidden { " in a hidden window" } else { "" }),
+    ))
+}
+
 pub fn content_checks(path: &Path, data: &[u8]) -> Vec<Detection> {
     let mut out = Vec::new();
+    if let Some(d) = msix_psf_script(path, data) {
+        out.push(d);
+    }
     if data.len() < 64 || !data.starts_with(b"MZ") {
         return out;
     }
@@ -95,6 +118,15 @@ pub fn content_checks(path: &Path, data: &[u8]) -> Vec<Detection> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn msix_startup_scripts() {
+        let cfg = r#"{"applications":[{"id":"App","executable":"app.exe"}],"processes":[{"executable":"PsfLauncher"}],"startScript":{"scriptPath":"refresh.ps1","showWindow": false,"waitForScriptToFinish":false}}"#;
+        let d = content_checks(Path::new("config.json"), cfg.as_bytes());
+        assert_eq!(d.len(), 1);
+        assert_eq!(d[0].severity, Severity::High);
+        assert!(content_checks(Path::new("config.json"), br#"{"name":"my-app","version":"1.0.0"}"#).is_empty());
+    }
 
     fn names(path: &str) -> Vec<String> {
         name_checks(Path::new(path)).into_iter().map(|d| d.name).collect()

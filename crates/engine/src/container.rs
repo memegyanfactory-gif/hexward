@@ -53,6 +53,14 @@ pub enum Format {
     Tar,
     SevenZ,
     Iso,
+    Rtf,
+    Pdf,
+    OneNote,
+    Cab,
+    Rar,
+    DiskImage(&'static str),
+    /// A Windows program with something packed inside it (installer data, UPX, PyInstaller).
+    Packed(&'static str),
 }
 
 impl Format {
@@ -63,6 +71,13 @@ impl Format {
             Format::Tar => "TAR",
             Format::SevenZ => "7z",
             Format::Iso => "ISO image",
+            Format::Rtf => "RTF document",
+            Format::Pdf => "PDF",
+            Format::OneNote => "OneNote notebook",
+            Format::Cab => "CAB archive",
+            Format::Rar => "RAR archive",
+            Format::DiskImage(k) => k,
+            Format::Packed(k) => k,
         }
     }
 }
@@ -79,6 +94,20 @@ pub fn detect(data: &[u8]) -> Option<Format> {
         Some(Format::Iso)
     } else if data.len() >= 512 && &data[257..262] == b"ustar" {
         Some(Format::Tar)
+    } else if crate::formats::is_rtf(data) {
+        Some(Format::Rtf)
+    } else if crate::formats::is_pdf(data) {
+        Some(Format::Pdf)
+    } else if crate::formats::is_onenote(data) {
+        Some(Format::OneNote)
+    } else if crate::formats::is_cab(data) {
+        Some(Format::Cab)
+    } else if crate::formats::is_rar(data) {
+        Some(Format::Rar)
+    } else if let Some(k) = crate::formats::disk_image_kind(data) {
+        Some(Format::DiskImage(k))
+    } else if data.starts_with(b"MZ") {
+        crate::installers::kind(data).map(Format::Packed)
     } else {
         None
     }
@@ -101,6 +130,10 @@ pub enum Note {
     Unreadable,
     /// The budget ran out before every entry was looked at.
     Truncated,
+    /// Listed but not unpacked (e.g. compressed RAR entries): its name is still checked.
+    Listed { entry: String },
+    /// Something a format reader noticed about the file itself (an auto-running PDF script...).
+    Finding { name: String, severity: crate::detect::Severity, text: String, entry: Option<String> },
 }
 
 #[derive(Debug, Default)]
@@ -132,6 +165,13 @@ pub fn expand(format: Format, data: &[u8], b: &mut Budget) -> Expansion {
         Format::Tar => tar(Cursor::new(data), b, &mut ex),
         Format::SevenZ => sevenz(data, b, &mut ex),
         Format::Iso => iso(data, b, &mut ex),
+        Format::Rtf => crate::formats::rtf(data, b, &mut ex),
+        Format::Pdf => crate::formats::pdf(data, b, &mut ex),
+        Format::OneNote => crate::formats::onenote(data, b, &mut ex),
+        Format::Cab => crate::formats::cab(data, b, &mut ex),
+        Format::Rar => crate::formats::rar(data, b, &mut ex),
+        Format::DiskImage(k) => crate::formats::disk_image(data, k, b, &mut ex),
+        Format::Packed(k) => crate::installers::unpack(data, k, b, &mut ex),
     };
     if !ok && ex.children.is_empty() && ex.notes.is_empty() {
         ex.notes.push(Note::Unreadable);

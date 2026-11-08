@@ -145,12 +145,27 @@ pub fn extract(data: &[u8]) -> Option<Extracted> {
             ex.embedded.push(file);
         }
     }
+
+    // MSI installers (and other OLE files): streams that hold a cabinet of files or a program
+    // (custom-action DLLs and EXEs live in the Binary table as their own streams).
+    for (path, is_stream) in &entries {
+        if !*is_stream || ex.embedded.len() > 2000 {
+            continue;
+        }
+        let Some(head) = read(path, 8) else { continue };
+        if head.starts_with(b"MSCF") || head.starts_with(b"MZ") {
+            let name = path.file_name().map(|n| n.to_string_lossy().chars().filter(|c| c.is_ascii_graphic()).collect::<String>()).unwrap_or_default();
+            if let Some(raw) = read(path, 512 * 1024 * 1024) {
+                ex.embedded.push((format!("stream {}{}", if name.is_empty() { "data" } else { &name }, if head.starts_with(b"MZ") { ".exe" } else { ".cab" }), raw));
+            }
+        }
+    }
     Some(ex)
 }
 
 /// Ole10Native layout: u32 total size, u16 flags, label\0, source path\0, u16, u16,
 /// u32 len + temp path, u32 data size, data. Only what's needed is parsed, all bounds-checked.
-fn parse_ole10native(d: &[u8]) -> Option<(String, Vec<u8>)> {
+pub fn parse_ole10native(d: &[u8]) -> Option<(String, Vec<u8>)> {
     let mut p = 6;
     let cstr = |p: &mut usize| -> Option<String> {
         let rest = d.get(*p..)?;

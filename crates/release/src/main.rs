@@ -51,7 +51,43 @@ fn main() -> Result<()> {
             app::verify(&file_name(file)?, &version, &std::fs::read(file)?, &sig, &public)?;
             println!("signature OK");
         }
-        _ => bail!("usage: hexward-release keygen <secret-file> | sign <file> --version <v> | verify <file> --version <v>"),
+        Some("channel") => {
+            // hexward-release channel [--current channel.json] [--pack <file> --version <v> --rules <n>] [--kill <v>] --out <dir>
+            use hexward_update::channel::{self, Channel, PackEntry};
+            use sha2::Digest;
+            let secret = std::env::var("HEXWARD_SIGNING_KEY").context("HEXWARD_SIGNING_KEY isn't set")?;
+            let out = Path::new(&arg(&args, "--out").context("--out <dir> is required")?).to_path_buf();
+            std::fs::create_dir_all(&out)?;
+            let current: Channel = match arg(&args, "--current") {
+                Some(p) if Path::new(&p).exists() => serde_json::from_slice(&std::fs::read(&p)?).context("current channel.json is unreadable")?,
+                _ => Channel::default(),
+            };
+            let new = match arg(&args, "--pack") {
+                Some(p) => {
+                    let p = Path::new(&p);
+                    let version = arg(&args, "--version").context("--version is required with --pack")?;
+                    let rules: usize = arg(&args, "--rules").and_then(|r| r.parse().ok()).unwrap_or(0);
+                    let data = std::fs::read(p)?;
+                    let file = format!("hexward-rules-{version}.yar");
+                    let sig = app::sign(&file, &version, &data, &secret)?;
+                    app::verify(&file, &version, &data, &sig, app::PUBLIC_KEY_HEX).context("signature doesn't match the app's built-in public key")?;
+                    std::fs::write(out.join(&file), &data)?;
+                    std::fs::write(out.join(format!("{file}.sig")), sig)?;
+                    Some(PackEntry { version, file, sha256: hex::encode(sha2::Sha256::digest(&data)), rules, published: chrono::Utc::now(), percent: 0 })
+                }
+                None => None,
+            };
+            let staged = channel::stage(current, new, arg(&args, "--kill").as_deref(), chrono::Utc::now());
+            let body = serde_json::to_vec_pretty(&staged)?;
+            let sig = app::sign("channel.json", "channel", &body, &secret)?;
+            app::verify("channel.json", "channel", &body, &sig, app::PUBLIC_KEY_HEX)?;
+            std::fs::write(out.join("channel.json"), &body)?;
+            std::fs::write(out.join("channel.json.sig"), sig)?;
+            for p in &staged.packs {
+                println!("{} {:>3}%{}", p.version, p.percent, if staged.killed.contains(&p.version) { " (killed)" } else { "" });
+            }
+        }
+        _ => bail!("usage: hexward-release keygen <secret-file> | sign <file> --version <v> | verify <file> --version <v> | channel …"),
     }
     Ok(())
 }

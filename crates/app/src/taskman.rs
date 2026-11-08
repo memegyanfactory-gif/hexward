@@ -109,7 +109,7 @@ fn worker(active: Arc<AtomicBool>, shared: Arc<Mutex<Shared>>) {
                 {
                     new_icons.push((k.clone(), px));
                 }
-                if p.risky_place && !*signed.entry(k.clone()).or_insert_with(|| sig::has_valid_signature(exe)) {
+                if p.risky_place && !*signed.entry(k.clone()).or_insert_with(|| sig::is_signed(exe)) {
                     unsigned.insert(k);
                 }
             }

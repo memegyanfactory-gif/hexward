@@ -44,13 +44,15 @@ enum Command {
     Quarantine(QuarantineCmd),
     /// Download the latest rule packs (YARA Forge, and MalwareBazaar hashes with an Auth-Key).
     Update {
-        /// Which YARA Forge pack to use.
-        /// Which YARA Forge pack to use: core, extended, full or off.
+        /// Which YARA Forge pack to use: core (from Hexward's signed rule channel), extended, full or off.
         #[arg(long, default_value = "core")]
         yara: update::ForgePack,
         /// Ignore the 5-minute wait between MalwareBazaar downloads.
         #[arg(long)]
         force: bool,
+        /// Go back to the previous rule pack.
+        #[arg(long)]
+        rollback: bool,
         #[arg(long)]
         json: bool,
     },
@@ -103,6 +105,9 @@ struct ScanArgs {
     /// Worker threads (default: CPU cores, up to 16).
     #[arg(long, default_value_t = 0)]
     threads: usize,
+    /// Scan at background priority so the PC stays responsive.
+    #[arg(long)]
+    low_priority: bool,
     /// File or folder to skip. Repeatable.
     #[arg(long, value_name = "PATH")]
     exclude: Vec<PathBuf>,
@@ -148,7 +153,11 @@ fn main() -> ExitCode {
         Command::Scan(a) => cmd_scan(a),
         Command::Startup { all, json, rules } => cmd_startup(all, json, &rules),
         Command::Quarantine(q) => cmd_quarantine(q).map(|_| false),
-        Command::Update { yara, force, json } => cmd_update(yara, force, json).map(|_| false),
+        Command::Update { rollback: true, .. } => update::rollback().map(|_| {
+            println!("Back on the previous rule pack.");
+            false
+        }),
+        Command::Update { yara, force, json, .. } => cmd_update(yara, force, json).map(|_| false),
         Command::Rules { verbose, rules } => cmd_rules(&rules, verbose).map(|_| false),
         Command::Audit(a) => audit_cmd::run(a),
         // These report their own exit codes (guard check: 0 allow, 1 ask, 2 deny).
@@ -287,7 +296,7 @@ fn cmd_scan(a: ScanArgs) -> Result<bool> {
     // Never scan Hexward's own data: the rule files would match the rules.
     excludes.push(hexward_engine::data_dir());
     let cache = (!a.no_cache).then(|| std::sync::Arc::new(hexward_engine::cache::ScanCache::open(hexward_engine::cache::ScanCache::default_path(), engine.fingerprint())));
-    let opts = ScanOptions { max_size: a.max_size_mb * 1024 * 1024, threads: a.threads, excludes, cache };
+    let opts = ScanOptions { max_size: a.max_size_mb * 1024 * 1024, threads: a.threads, excludes, cache, low_priority: a.low_priority };
 
     if !a.json {
         println!("{} {} · {}", st.good("hexward"), env!("CARGO_PKG_VERSION"), kind);
@@ -568,7 +577,7 @@ fn cmd_update(pack: update::ForgePack, force: bool, json: bool) -> Result<()> {
     if json {
         println!("{}", serde_json::to_string_pretty(&report)?);
     } else {
-        for (name, step) in [("YARA Forge", &report.yara_forge), ("MalwareBazaar", &report.malwarebazaar)] {
+        for (name, step) in [("YARA Forge", &report.yara_forge), ("MalwareBazaar", &report.malwarebazaar), ("Drivers", &report.drivers)] {
             match step {
                 update::Step::Updated { detail } => println!("  {}  {name}: {detail}", st.good("updated")),
                 update::Step::Skipped { reason } => println!("  {}  {name}: {reason}", st.dim("skipped")),
