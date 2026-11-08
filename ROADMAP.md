@@ -87,7 +87,7 @@ Cleaner
 - [x] `hexward audit <folder or git URL>` and an "Audit a project" screen (repositories cloned with hooks, submodules, LFS and fsmonitor off)
 - [x] Install-time code: npm pre/postinstall (project and installed packages), setup.py/pyproject, Cargo build.rs, binding.gyp, git hooks, git config, submodules
 - [x] Known-malicious versions (OSV `MAL-*`), names missing from npm/PyPI (slopsquatting), packages from git or URLs, dependency confusion
-- [ ] Release anomalies: sudden version jumps, 10× size growth, releases without a git tag
+- [x] Release anomalies: new install scripts, sudden version jumps, 10× size growth, releases without a git commit (online check)
 - [x] Agent and IDE configs: `.claude/settings.json` hooks, `.vscode/tasks.json` folder-open tasks, MCP configs
 - [x] Hidden text for AI agents: Unicode tags, zero-width and bidi characters, prompt injection in docs
 - [x] GitHub Actions: tags instead of SHAs, `pull_request_target` misuse, broad permissions
@@ -98,16 +98,17 @@ Cleaner
 ## Phase 4 · Smarter detection
 
 - [ ] Static machine learning on Windows programs (EMBER2024 models) as one signal, never alone
-- [ ] Memory scanning of running processes with YARA
-- [ ] Ransomware shield: canary files, rename/entropy bursts, shadow-copy deletion; file rollback
+- [x] Memory scanning of running processes with YARA (memory not loaded from files, injected programs)
+- [x] Ransomware shield: canary files, rename/entropy bursts, shadow-copy deletion blocked
+- [ ] File rollback after a ransomware attack (needs Windows shadow copies and admin rights)
 - [ ] Unpacking and emulation for common packers
 
 ## Phase 5 · Certification (free route)
 
 - [x] Our own update signing (Ed25519) and signed GitHub releases (first: v0.2.0)
 - [ ] Free Authenticode signing through the SignPath Foundation (open-source program)
-- [ ] EULA, privacy policy, published criteria for unwanted software
-- [ ] Internal AMTSO-style tests published
+- [x] EULA, privacy policy, published criteria for unwanted software ([docs/EULA.md](docs/EULA.md), [docs/PRIVACY.md](docs/PRIVACY.md), [docs/UNWANTED-SOFTWARE.md](docs/UNWANTED-SOFTWARE.md))
+- [x] Internal AMTSO-style tests published ([docs/SELFTEST.md](docs/SELFTEST.md), run on every release)
 - [ ] Free lab test series: AVLab, AV-Comparatives main series, SE Labs
 
 ## Phase 6 · Cloud intelligence (opt-in) and the website

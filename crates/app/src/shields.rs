@@ -59,6 +59,8 @@ pub struct Shields {
     pub auto_quarantine: Arc<AtomicBool>,
     /// Script shield (AMSI): judge scripts the provider DLL hands over.
     pub script_on: Arc<AtomicBool>,
+    /// Ransomware shield (decoy files and encryption bursts).
+    pub ransom_on: Arc<AtomicBool>,
     pub stats: Arc<ShieldStats>,
     pub watched: Vec<PathBuf>,
     _watcher: Option<notify::RecommendedWatcher>,
@@ -272,6 +274,91 @@ impl Shields {
             std::thread::Builder::new().name("script-shield".into()).spawn(move || crate::amsi::serve(engine, on, events)).ok();
         }
 
+        // ---- ransomware shield: decoy files, encryption bursts ----
+        let ransom_on = Arc::new(AtomicBool::new(true));
+        {
+            let (events, on, auto) = (events.clone(), ransom_on.clone(), auto.clone());
+            std::thread::Builder::new()
+                .name("ransomware-shield".into())
+                .spawn(move || {
+                    use hexward_engine::ransom::{BurstWatch, Change, ensure_canaries, looks_encrypted, top_writer, touched};
+                    hexward_engine::perf::background_thread();
+                    let folders: Vec<PathBuf> = [dirs::document_dir(), dirs::desktop_dir(), dirs::picture_dir(), dirs::audio_dir(), dirs::video_dir()].into_iter().flatten().filter(|p| p.is_dir()).collect();
+                    // Development builds don't put decoys in the developer's folders.
+                    let dev = std::env::current_exe().map(|e| e.to_string_lossy().to_ascii_lowercase().contains(r"\target\")).unwrap_or(true);
+                    let store = data_dir().join("canaries.json");
+                    let mut canaries = if dev { Vec::new() } else { ensure_canaries(&folders, &store) };
+                    let (tx, rx) = std::sync::mpsc::channel::<(PathBuf, Change)>();
+                    let mut watcher = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
+                        let Ok(ev) = res else { return };
+                        use notify::EventKind::{Create, Modify, Remove};
+                        use notify::event::ModifyKind;
+                        let change = match ev.kind {
+                            Modify(ModifyKind::Name(_)) => Change::Renamed,
+                            Create(_) | Modify(_) => Change::Modified,
+                            Remove(_) => Change::Removed,
+                            _ => return,
+                        };
+                        if let Some(p) = ev.paths.last() {
+                            let _ = tx.send((p.clone(), change));
+                        }
+                    })
+                    .ok();
+                    if let Some(w) = watcher.as_mut() {
+                        for f in &folders {
+                            let _ = w.watch(f, notify::RecursiveMode::Recursive);
+                        }
+                    }
+                    let Ok(mut sys) = sysinfo::System::new() else { return };
+                    let mut burst = BurstWatch::new(Duration::from_secs(10));
+                    let mut quiet_until = Instant::now();
+                    loop {
+                        std::thread::sleep(Duration::from_secs(1));
+                        let writer = top_writer(&mut sys); // keeps disk-usage counters per second
+                        let mut checked = 0;
+                        while let Ok((path, change)) = rx.try_recv() {
+                            if path.file_name().is_some_and(|n| n.to_string_lossy().contains("hexward-canary")) {
+                                continue;
+                            }
+                            let enc = change != Change::Removed && checked < 300 && {
+                                checked += 1;
+                                looks_encrypted(&path)
+                            };
+                            burst.record(Instant::now(), path, change, enc);
+                        }
+                        if !on.load(Ordering::Relaxed) || Instant::now() < quiet_until {
+                            continue;
+                        }
+                        let hit = touched(&canaries);
+                        let reason = if !hit.is_empty() {
+                            Some(format!("A decoy file Hexward keeps in your folders was changed or removed ({}).", hit[0].display()))
+                        } else {
+                            burst.check().map(|a| format!("{}.", a.reason))
+                        };
+                        let Some(reason) = reason else { continue };
+                        let mut action = format!("{reason} That's how ransomware behaves.");
+                        match &writer {
+                            Some((pid, name, exe)) => {
+                                let stopped = auto.load(Ordering::Relaxed) && sysinfo::Pid::from_u32(*pid).as_u32() > 0 && sys.process(sysinfo::Pid::from_u32(*pid)).is_some_and(|p| p.kill());
+                                action.push_str(&format!(
+                                    " The unsigned program writing the most was {name}{}. {}",
+                                    exe.as_ref().map(|e| format!(" ({})", e.display())).unwrap_or_default(),
+                                    if stopped { "Hexward stopped it. Scan it, and don't restart it." } else { "End it in Tasks now if you don't recognize it." }
+                                ));
+                            }
+                            None => action.push_str(" No unsigned program was writing heavily; if you're copying or converting lots of files yourself, that's the cause."),
+                        }
+                        push(&events, ShieldEvent { shield: "Ransomware shield", report: None, title: "Possible ransomware activity".into(), action, quarantined: false, neutralize: false });
+                        burst.clear();
+                        quiet_until = Instant::now() + Duration::from_secs(60);
+                        if !dev {
+                            canaries = ensure_canaries(&folders, &store);
+                        }
+                    }
+                })
+                .ok();
+        }
+
         // ---- driver watch: alert when a new kernel driver is installed ----
         {
             let (engine, events, process_on, stats) = (engine.clone(), events.clone(), process_on.clone(), stats.clone());
@@ -453,6 +540,7 @@ impl Shields {
             stealer_on,
             auto_quarantine: auto,
             script_on,
+            ransom_on,
             stats,
             watched: list.into_iter().map(|(p, _)| p).collect(),
             _watcher: watcher,

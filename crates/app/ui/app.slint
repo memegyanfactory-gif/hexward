@@ -745,6 +745,7 @@ export component AppWindow inherits Window {
     in property <string> tasks-mem: "…";
     in property <bool> tasks-loading: true;
     in property <bool> tasks-scanning;
+    in property <bool> tasks-memory-busy;
 
     // Dev & AI
     in-out property <string> dev-tab: "audit";
@@ -791,6 +792,7 @@ export component AppWindow inherits Window {
     in property <bool> start-with-windows: true;
     in property <bool> quiet-mode: true;
     in property <bool> script-shield;
+    in property <bool> ransomware-shield: true;
     in property <bool> script-shield-busy;
     in property <bool> file-shield: true;
     in property <bool> process-shield: true;
@@ -853,6 +855,7 @@ export component AppWindow inherits Window {
     callback task-end(int);
     callback task-scan(string);
     callback task-open(string);
+    callback tasks-scan-memory();
     callback vault-restore(string);
     callback vault-ask(int);
     callback vault-cancel(int);
@@ -866,6 +869,7 @@ export component AppWindow inherits Window {
     callback set-start-with-windows(bool);
     callback set-quiet-mode(bool);
     callback set-script-shield(bool);
+    callback set-ransomware-shield(bool);
     callback set-file-shield(bool);
     callback set-process-shield(bool);
     callback set-auto-quarantine(bool);
@@ -881,7 +885,7 @@ export component AppWindow inherits Window {
     callback toggle-maximize();
     callback close-window();
 
-    property <bool> moving: root.scanning || root.boot < 1 || root.flash || root.startup-busy || root.updating || root.app-update-busy || root.home-state == "alarm" || root.tasks-scanning || (root.page == "tasks" && root.tasks-loading) || root.cleaner-busy || root.audit-busy || root.ext-busy;
+    property <bool> moving: root.scanning || root.boot < 1 || root.flash || root.startup-busy || root.updating || root.app-update-busy || root.home-state == "alarm" || root.tasks-scanning || root.tasks-memory-busy || (root.page == "tasks" && root.tasks-loading) || root.cleaner-busy || root.audit-busy || root.ext-busy;
     Timer {
         interval: 33ms;
         running: root.moving;
@@ -1750,6 +1754,7 @@ export component AppWindow inherits Window {
                         }
                         HorizontalLayout {
                             spacing: 8px;
+                            Btn { text: root.tasks-memory-busy ? "Reading memory…" : "Scan memory"; small: true; kind: "ghost"; has-icon: true; icon: Assets.i-scan; enabled: !root.tasks-memory-busy && root.engine-ready; clicked => { root.tasks-scan-memory(); } }
                             Btn { text: "Apps · " + root.tasks-n-apps; small: true; kind: root.tasks-group == "apps" ? "primary" : "ghost"; clicked => { root.tasks-group = "apps"; root.tasks-changed(); } }
                             Btn { text: "Background · " + root.tasks-n-background; small: true; kind: root.tasks-group == "background" ? "primary" : "ghost"; clicked => { root.tasks-group = "background"; root.tasks-changed(); } }
                             Btn { text: "Windows · " + root.tasks-n-windows; small: true; kind: root.tasks-group == "windows" ? "primary" : "ghost"; clicked => { root.tasks-group = "windows"; root.tasks-changed(); } }
@@ -1964,6 +1969,7 @@ export component AppWindow inherits Window {
                                     SettingRow { title: "Process shield"; text: "Checks every program the moment it starts. Each program file is checked once until it changes."; Switch { checked: root.process-shield; toggled(v) => { root.set-process-shield(v); } } }
                                     SettingRow { title: "ClickFix shield"; text: "Catches fake \"verify you're human\" pages that copy a command for you to paste. Clear-cut ones are replaced on the clipboard."; Switch { checked: root.clickfix-shield; toggled(v) => { root.set-clickfix-shield(v); } } }
                                     SettingRow { title: "Script shield (AMSI)"; text: root.script-shield-busy ? "Waiting for Windows' administrator prompt…" : "Checks PowerShell, VBScript, JScript and Office macros as they run, after they're decoded. Turning it on asks for administrator approval once."; Switch { checked: root.script-shield; toggled(v) => { root.set-script-shield(v); } } }
+                                    SettingRow { title: "Ransomware shield"; text: "Keeps hidden decoy files in your folders and watches for files being renamed or encrypted in bulk. Stops the unsigned program doing it, and blocks attempts to delete Windows' backup copies."; Switch { checked: root.ransomware-shield; toggled(v) => { root.set-ransomware-shield(v); } } }
                                     SettingRow { title: "Stealer shield"; text: "Alerts when a program that isn't your browser, Discord, Telegram or wallet opens their saved passwords, cookies or keys."; Switch { checked: root.stealer-shield; toggled(v) => { root.set-stealer-shield(v); } } }
                                     SettingRow {
                                         title: "Quarantine confirmed threats automatically";

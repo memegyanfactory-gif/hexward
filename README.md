@@ -13,7 +13,7 @@ No account. No ads. No paid tier. Nothing leaves your PC unless you choose to se
 ![Platform](https://img.shields.io/badge/Windows-10%20%7C%2011-0B0F14?logo=windows&logoColor=4BE07A)
 ![License](https://img.shields.io/badge/license-GPL--3.0-0B0F14?labelColor=1A7F45)
 ![Rules](https://img.shields.io/badge/YARA%20rules-5%2C100%2B-0B0F14?labelColor=1A7F45)
-![Tests](https://img.shields.io/badge/tests-123%20passing-0B0F14?labelColor=1A7F45)
+![Tests](https://img.shields.io/badge/tests-130%20passing-0B0F14?labelColor=1A7F45)
 
 <img src="docs/screenshots/01-home.png" alt="Hexward home screen" width="860">
 
@@ -131,6 +131,8 @@ The shields run in user mode (no kernel driver, no admin rights, no paid certifi
 - **Script shield (AMSI):** PowerShell, VBScript, JScript and Office macros are checked as they run, after Windows has decoded them. A small provider DLL hands each script to Hexward; if Hexward doesn't answer in 3 seconds the script runs as normal, so it can never make PowerShell hang. Turning it on needs administrator approval once (the DLL goes into Program Files so it can't be swapped).
 - **Download marks:** files unpacked from a downloaded archive get Windows' "from the internet" mark back (many archive tools drop it), so SmartScreen and Office's Protected View still warn.
 - **Driver watch:** a new kernel driver is reported with its publisher and signature, and checked against ~3,000 known vulnerable and malicious drivers (the "bring your own vulnerable driver" trick ransomware uses to switch off security software).
+- **Ransomware shield:** hidden decoy files in your folders, and a watch for files being renamed or rewritten as encrypted data in bulk. It stops the unsigned program writing the most and blocks attempts to delete Windows' backup copies.
+- **Memory scan** (Tasks › Scan memory, or `hexward scan --memory`): reads the executable memory of running programs that didn't come from a file, where unpacked and injected code lives.
 - **Background and quiet:** Hexward starts with Windows in the notification area (no admin rights). During full-screen games, videos and presentations notifications wait and scans pause; shields and quiet-time scans run at background CPU and disk priority.
 - **ClickFix shield:** watches what gets copied. A command that downloads and runs code is flagged; a clear-cut "verify you're human" lure (download + run + a hidden window, encoded command or fake verification comment) is replaced on the clipboard, so pasting it into Win+R does nothing. It also checks your Win+R history for lures pasted in the past. Real install commands (like Scoop's) only get a warning.
 - **Stealer shield:** asks Windows which programs have browser passwords and cookies (Chrome, Edge, Brave, Vivaldi, Opera, Yandex, Firefox), Discord and Telegram sessions, or crypto wallets (Exodus, Electrum, Atomic) open, and flags anything that isn't the app that owns them. Unsigned programs running from Temp or Downloads are stopped and quarantined automatically; signed ones only raise a warning.
@@ -184,6 +186,7 @@ target\release\hexward-app.exe
 ```bash
 hexward update                          # download rule packs
 hexward update --rollback               # go back to the previous rule pack
+hexward scan --memory                   # check the memory of running programs
 hexward scan                            # quick scan
 hexward scan D:\Downloads E:\           # any files, folders or drives
 hexward scan --full                     # every fixed drive
@@ -245,6 +248,9 @@ flowchart LR
 
 ## Privacy
 
+The full policy is in [docs/PRIVACY.md](docs/PRIVACY.md); the licence terms in plain words in [docs/EULA.md](docs/EULA.md); what counts as malware, suspicious or unwanted in [docs/UNWANTED-SOFTWARE.md](docs/UNWANTED-SOFTWARE.md).
+
+
 - No account, no telemetry, no analytics.
 - Scans, history, quarantine and settings stay in `%LOCALAPPDATA%\Hexward`.
 - Network use: rule and blocklist downloads (GitHub, abuse.ch, loldrivers.io, Microsoft), the update check (GitHub API), and, only when you tick **Check online** in a project audit, package names and versions sent to OSV.dev, npm and PyPI. Nothing else.
@@ -271,13 +277,14 @@ docs/            strategy and research, screenshots
 ## Testing
 
 ```bash
-cargo test --workspace      # 123 tests
+cargo test --workspace      # 130 tests
 cargo clippy --workspace --all-targets -- -D warnings
 target\debug\hexward-app.exe --shots docs\screenshots   # renders every screen to PNG
 ```
 
 - **What the tests cover:** detection on harmless markers and fragment-built attack samples; real Windows files
   that must stay clean (notepad.exe, every Start-menu shortcut); and hostile inputs: zip bombs, malformed archives,
+  malformed RTF, PDF, OneNote, RAR and CAB files;
   malformed shortcuts and malformed documents.
 - **Also tested:** quarantine round trips, signature verification of updates, the command line end to end, the cleaner on
   Chromium-style profiles (bookmarks must survive, files held open must be skipped), and the task manager refusing to end system processes.

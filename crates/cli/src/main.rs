@@ -105,6 +105,9 @@ struct ScanArgs {
     /// Worker threads (default: CPU cores, up to 16).
     #[arg(long, default_value_t = 0)]
     threads: usize,
+    /// Scan the memory of running programs instead of files.
+    #[arg(long, conflicts_with_all = ["paths", "full"])]
+    memory: bool,
     /// Scan at background priority so the PC stays responsive.
     #[arg(long)]
     low_priority: bool,
@@ -273,6 +276,26 @@ struct Failed {
 fn cmd_scan(a: ScanArgs) -> Result<bool> {
     let st = Style::stdout();
     let engine = load_engine(&a.rules)?;
+    if a.memory {
+        if !a.json {
+            println!("Reading the memory of running programs…");
+        }
+        let (found, read) = hexward_engine::memscan::scan_all(&engine);
+        if a.json {
+            let rows: Vec<_> = found.iter().map(|f| serde_json::json!({ "pid": f.pid, "name": f.name, "address": format!("{:#x}", f.address), "detections": f.detections })).collect();
+            println!("{}", serde_json::to_string_pretty(&serde_json::json!({ "programs_read": read, "findings": rows }))?);
+        } else {
+            for f in &found {
+                for d in &f.detections {
+                    println!("  {} {}  {}", st.sev(d.severity), d.name, st.dim(&format!("{} (pid {}) at {:#x}", f.name, f.pid, f.address)));
+                    println!("          {}", d.description);
+                }
+            }
+            println!("{} programs' memory read{}.", read, if found.is_empty() { ", nothing found" } else { "" });
+            println!("{}", st.dim("Programs running as administrator or protected by Windows can only be read from an elevated prompt."));
+        }
+        return Ok(found.iter().any(|f| f.detections.iter().any(|d| d.is_confirmed())));
+    }
     let vault_dir = Vault::default_dir();
 
     let (kind, roots): (&str, Vec<PathBuf>) = if a.full {

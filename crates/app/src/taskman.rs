@@ -17,6 +17,7 @@ use slint::{Image, Model, ModelRc, SharedString, VecModel};
 use crate::{AppWindow, State, TaskRow, bytes, icons, log, toast};
 
 type Pixels = (u32, u32, Vec<u8>);
+type MemorySlot = Arc<Mutex<Option<(Vec<hexward_engine::memscan::MemoryFinding>, usize)>>>;
 type ScanSlot = Arc<Mutex<Option<(PathBuf, Result<Option<FileReport>, String>)>>>;
 
 struct Snapshot {
@@ -44,6 +45,7 @@ pub struct TaskMan {
     rows: Rc<VecModel<TaskRow>>,
     confirm: Option<u32>,
     scan_slot: ScanSlot,
+    memory_slot: MemorySlot,
 }
 
 fn key(p: &std::path::Path) -> String {
@@ -63,6 +65,7 @@ impl TaskMan {
             rows: Rc::new(VecModel::default()),
             confirm: None,
             scan_slot: Arc::new(Mutex::new(None)),
+            memory_slot: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -302,6 +305,56 @@ pub fn scan(st: &mut State, ui: &AppWindow, path: SharedString) {
             *g = Some((path, r));
         }
     });
+}
+
+/// Reads the memory of every running program it may read, on a worker thread.
+pub fn scan_memory(st: &mut State, ui: &AppWindow) {
+    let Some(engine) = st.engine.clone() else {
+        toast(st, ui, "warn", "Rules are still loading", "Try again in a moment.");
+        return;
+    };
+    if ui.get_tasks_memory_busy() {
+        return;
+    }
+    ui.set_tasks_memory_busy(true);
+    let out = st.tasks.memory_slot.clone();
+    std::thread::spawn(move || {
+        hexward_engine::perf::background_thread();
+        let r = hexward_engine::memscan::scan_all(&engine);
+        if let Ok(mut g) = out.lock() {
+            *g = Some(r);
+        }
+    });
+}
+
+/// Called from tick(): turns memory findings into alerts (never into quarantine of the program
+/// file: the program itself may be the victim of an injection).
+pub fn tick_memory(st: &mut State, ui: &AppWindow) {
+    let done = st.tasks.memory_slot.lock().ok().and_then(|mut g| g.take());
+    let Some((found, read)) = done else { return };
+    ui.set_tasks_memory_busy(false);
+    let mut e = Event::new(EventKind::Scan, "Memory scan", format!("{read} programs' memory read · {} found", found.len()));
+    e.threats = found.len() as u64;
+    hexward_engine::history::append(e);
+    if found.is_empty() {
+        toast(st, ui, "safe", "Memory looks clean", &format!("Read the memory of {read} running programs. Nothing hiding there."));
+        return;
+    }
+    for f in found {
+        let d = &f.detections[0];
+        crate::shield_hit(
+            st,
+            ui,
+            crate::shields::ShieldEvent {
+                shield: "Memory scan",
+                report: None,
+                title: format!("{} in the memory of {} (pid {})", d.name, f.name, f.pid),
+                action: format!("{} End the program in Tasks; if it's a Windows program, restart the PC and run a full scan.", d.description),
+                quarantined: false,
+                neutralize: false,
+            },
+        );
+    }
 }
 
 pub fn open_location(path: SharedString) {

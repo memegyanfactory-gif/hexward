@@ -2,6 +2,14 @@
 
 Each `## version` section becomes the release notes and the first line shows in the app's update banner.
 
+## 0.4.0
+
+- Ransomware shield: hidden decoy files, bulk rename and encryption detection, backup-deletion blocking
+- Memory scan: checks the memory of running programs for unpacked and injected code (Tasks › Scan memory)
+- Project audits now spot odd dependency releases: a new install script, a 10× size jump, a huge version jump, or a release with no git commit
+- Self-test of every threat type on each release ([docs/SELFTEST.md](docs/SELFTEST.md))
+- Privacy policy, plain-words licence terms and published criteria for unwanted software
+
 ## 0.3.0
 
 - Looks inside more: RTF objects (Equation Editor exploits), PDF scripts, launch actions and attachments, OneNote attachments, CAB, RAR (names and stored files), MSI, NSIS installers, PyInstaller programs, UPX-packed programs, and VHD/VHDX/IMG disk images

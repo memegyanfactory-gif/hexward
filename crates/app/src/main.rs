@@ -59,6 +59,8 @@ struct Settings {
     quiet_mode: bool,
     /// Judge scripts the AMSI provider hands over (when it's installed).
     script_shield: bool,
+    /// Decoy files and encryption-burst detection.
+    ransomware_shield: bool,
 }
 
 impl Default for Settings {
@@ -79,6 +81,7 @@ impl Default for Settings {
             start_with_windows: true,
             quiet_mode: true,
             script_shield: true,
+            ransomware_shield: true,
         }
     }
 }
@@ -544,6 +547,11 @@ fn refresh_home(st: &State, ui: &AppWindow) {
             tone: if st.settings.stealer_shield { "safe".into() } else { "warn".into() },
         },
         StatusRow {
+            name: "Ransomware shield".into(),
+            value: if st.settings.ransomware_shield { "Watching your folders".into() } else { "Off".into() },
+            tone: if st.settings.ransomware_shield { "safe".into() } else { "warn".into() },
+        },
+        StatusRow {
             name: "Script shield".into(),
             value: if amsi::is_registered() && st.settings.script_shield { "Checking scripts as they run".into() } else { "Off (one admin approval in Settings)".into() },
             tone: if amsi::is_registered() && st.settings.script_shield { "safe".into() } else { "off".into() },
@@ -615,6 +623,7 @@ fn refresh_settings(st: &State, ui: &AppWindow) {
     ui.set_close_to_tray(st.settings.close_to_tray);
     ui.set_start_with_windows(st.settings.start_with_windows);
     ui.set_quiet_mode(st.settings.quiet_mode);
+    ui.set_ransomware_shield(st.settings.ransomware_shield);
     ui.set_script_shield(st.settings.script_shield && amsi::is_registered());
     ui.set_file_shield(st.settings.file_shield);
     ui.set_process_shield(st.settings.process_shield);
@@ -1278,6 +1287,7 @@ fn tick(st: &mut State, ui: &AppWindow) {
     }
     tick_scan(st, ui);
     taskman::tick(st, ui);
+    taskman::tick_memory(st, ui);
     cleanui::tick(st, ui);
     devui::tick(st, ui);
     for ev in st.shields.drain() {
@@ -1511,6 +1521,7 @@ fn main() -> Result<(), slint::PlatformError> {
     {
         let mut s = st.borrow_mut();
         ui.set_tasks(s.tasks.model());
+        s.shields.ransom_on.store(s.settings.ransomware_shield, Ordering::Relaxed);
         load_engine(&mut s);
         // Keep the start-with-Windows entry pointing at this copy (installed builds only).
         if let Ok(exe) = std::env::current_exe()
@@ -1715,6 +1726,7 @@ fn main() -> Result<(), slint::PlatformError> {
     on!(on_task_end, |s, u, pid: i32| { taskman::end(s, &u, pid) });
     on!(on_task_scan, |s, u, path: SharedString| { taskman::scan(s, &u, path) });
     on!(on_task_open, |_s, _u, path: SharedString| { taskman::open_location(path) });
+    on!(on_tasks_scan_memory, |s, u| { taskman::scan_memory(s, &u) });
     on!(on_audit_run, |s, u| { devui::run(s, &u) });
     on!(on_audit_reshow, |s, u| { devui::reshow(s, &u) });
     on!(on_audit_open, |_s, _u, path: SharedString| { devui::open_file(path) });
@@ -1820,6 +1832,13 @@ fn main() -> Result<(), slint::PlatformError> {
                 *g = Some((v, r));
             }
         });
+    });
+    on!(on_set_ransomware_shield, |s, u, v: bool| {
+        s.settings.ransomware_shield = v;
+        s.settings.save();
+        s.shields.ransom_on.store(v, Ordering::Relaxed);
+        u.set_ransomware_shield(v);
+        refresh_home(s, &u);
     });
     on!(on_set_quiet_mode, |s, u, v: bool| {
         s.settings.quiet_mode = v;

@@ -98,6 +98,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: ./scripts/clean-corpus.ps1 -Hexward ./target/release/hexward.exe
 
+      # Harmless samples of every threat type must be caught (AMTSO-style self-test).
+      - name: Self-test
+        shell: pwsh
+        run: ./scripts/selftest.ps1 -Hexward ./target/release/hexward.exe -Out selftest.md
+
       - name: Build
         if: steps.v.outputs.exists == 'false'
         run: cargo build --release --locked -p hexward-app -p hexward -p hexward-release -p hexward-amsi

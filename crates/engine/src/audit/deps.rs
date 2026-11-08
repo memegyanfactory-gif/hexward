@@ -215,6 +215,11 @@ pub fn missing_finding(p: &Package) -> Finding {
     )
 }
 
+/// An odd release of a direct dependency (new install script, size jump, version jump, no git commit).
+pub fn anomaly_finding(p: &Package, title: &str, detail: &str) -> Finding {
+    finding("dep-release-anomaly", Level::Medium, "", None, format!("{}: {title}", p.name), detail.to_string(), "Compare this release with the previous one before trusting it; pin the previous version until you have.", &format!("{} {}@{}", p.ecosystem, p.name, p.version))
+}
+
 /// A summary finding for known (non-malware) vulnerabilities.
 pub fn vulnerable_finding(count: usize, examples: &str) -> Finding {
     finding("dep-vulnerable", Level::Low, "", None, format!("{count} dependency versions have known vulnerabilities"), format!("Not malware, but worth updating: {examples}"), "Run your package manager's audit (npm audit, pip-audit, cargo audit) and update.", "")
