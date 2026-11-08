@@ -567,6 +567,7 @@ mod fix_tests {
         use winreg::enums::HKEY_CURRENT_USER;
         let home = tempfile::tempdir().unwrap();
         // SAFETY: only this test reads HEXWARD_HOME through startup's disabled list.
+        let _home = crate::TEST_HOME.lock().unwrap_or_else(|e| e.into_inner());
         unsafe { std::env::set_var("HEXWARD_HOME", home.path()) };
 
         // A throwaway key, never a real Run key.

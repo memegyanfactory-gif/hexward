@@ -81,15 +81,16 @@ Cleaner
 
 ## Phase 3 · Developer, supply-chain and AI-agent protection (our edge)
 
-- [ ] `hexward audit <folder or git URL>` and an "Audit a project" screen
-- [ ] Install-time code: npm pre/postinstall, setup.py/pyproject, Cargo build.rs, binding.gyp, git hooks
-- [ ] Known-malicious versions (OSV `MAL-*`), phantom dependencies, version jumps, 10× size growth, tagless releases
-- [ ] Agent and IDE configs: `.claude/settings.json` hooks, `.vscode/tasks.json` folder-open tasks, MCP configs
-- [ ] Hidden text for AI agents: Unicode tags, zero-width and bidi characters, prompt injection in docs
-- [ ] GitHub Actions: tags instead of SHAs, `pull_request_target` misuse, broad permissions
-- [ ] Leaked secrets in files and git history
-- [ ] Hexward Guard: checks agent commands before they run; MCP servers pinned by hash; user approves
-- [ ] Extension inventory: VS Code, Cursor, Open VSX and browser extensions, with version diffs
+- [x] `hexward audit <folder or git URL>` and an "Audit a project" screen (repositories cloned with hooks, submodules, LFS and fsmonitor off)
+- [x] Install-time code: npm pre/postinstall (project and installed packages), setup.py/pyproject, Cargo build.rs, binding.gyp, git hooks, git config, submodules
+- [x] Known-malicious versions (OSV `MAL-*`), names missing from npm/PyPI (slopsquatting), packages from git or URLs, dependency confusion
+- [ ] Release anomalies: sudden version jumps, 10× size growth, releases without a git tag
+- [x] Agent and IDE configs: `.claude/settings.json` hooks, `.vscode/tasks.json` folder-open tasks, MCP configs
+- [x] Hidden text for AI agents: Unicode tags, zero-width and bidi characters, prompt injection in docs
+- [x] GitHub Actions: tags instead of SHAs, `pull_request_target` misuse, broad permissions
+- [x] Leaked secrets in files and git history
+- [x] Hexward Guard: checks agent commands before they run; MCP servers pinned by hash; user approves
+- [x] Extension inventory: VS Code, Cursor, Open VSX and browser extensions, with version diffs
 
 ## Phase 4 · Smarter detection
 

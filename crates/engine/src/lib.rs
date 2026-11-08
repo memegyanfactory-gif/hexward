@@ -8,17 +8,21 @@
 //! 5. content checks (Windows programs disguised as documents or images)
 
 pub mod allowlist;
+pub mod audit;
 pub mod behavior;
 pub mod cache;
 pub mod cleaner;
 pub mod container;
 pub mod detect;
 pub mod fileinfo;
+pub mod guard;
 pub mod eicar;
+pub mod extensions;
 pub mod hashdb;
 pub mod heuristics;
 pub mod history;
 pub mod lnk;
+pub mod mcp;
 pub mod locations;
 pub mod office;
 pub mod rules;
@@ -58,3 +62,7 @@ pub fn data_dir() -> PathBuf {
         .unwrap_or_else(std::env::temp_dir)
         .join("Hexward")
 }
+
+/// Tests that point HEXWARD_HOME at a temporary folder hold this, so they don't race.
+#[cfg(test)]
+pub(crate) static TEST_HOME: std::sync::Mutex<()> = std::sync::Mutex::new(());

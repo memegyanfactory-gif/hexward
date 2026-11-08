@@ -7,6 +7,7 @@
 mod art;
 mod cleanui;
 mod clipboard;
+mod devui;
 mod icons;
 mod shields;
 mod taskman;
@@ -158,6 +159,8 @@ struct State {
     shields: shields::Shields,
     tasks: taskman::TaskMan,
     cleaner: cleanui::Cleaner,
+    dev: devui::Dev,
+    dev_report: Option<(hexward_engine::audit::Report, String)>,
     /// Message-only window that owns clipboard text Hexward writes (created on the UI thread).
     #[cfg(windows)]
     clip_owner: windows_sys::Win32::Foundation::HWND,
@@ -275,6 +278,7 @@ pub(crate) fn set_assets(ui: &AppWindow) {
     a.set_i_tasks(icon("tasks"));
     a.set_i_sparkle(icon("sparkle"));
     a.set_i_lock(icon("lock"));
+    a.set_i_terminal(icon("terminal"));
     ui.set_app_icon(to_image(art::render(&art::MARK, 4, art::mark_color(art::MOSS_HI, art::MOSS_LO, Some(art::OXIDE)))));
 }
 
@@ -1152,6 +1156,7 @@ fn tick(st: &mut State, ui: &AppWindow) {
     tick_scan(st, ui);
     taskman::tick(st, ui);
     cleanui::tick(st, ui);
+    devui::tick(st, ui);
     for ev in st.shields.drain() {
         shield_hit(st, ui, ev);
     }
@@ -1286,6 +1291,20 @@ fn make_tray() -> Option<Tray> {
 
 fn main() -> Result<(), slint::PlatformError> {
     let args: Vec<String> = std::env::args().collect();
+    // `hexward-app guard hook`: the Claude Code hook (see Hexward Guard). Answers and exits; no window.
+    if args.get(1).map(String::as_str) == Some("guard") && args.get(2).map(String::as_str) == Some("hook") {
+        use std::io::Read;
+        let mut s = String::new();
+        let _ = std::io::stdin().read_to_string(&mut s);
+        if let Ok(input) = serde_json::from_str::<hexward_engine::guard::HookInput>(&s) {
+            let (verdict, out) = hexward_engine::guard::hook(&input);
+            hexward_engine::guard::log(&input, &verdict);
+            if let Some(json) = out {
+                println!("{json}");
+            }
+        }
+        return Ok(());
+    }
     if let Some(i) = args.iter().position(|a| a == "--shots") {
         return shots::run(PathBuf::from(args.get(i + 1).cloned().unwrap_or_else(|| "shots".into())));
     }
@@ -1336,6 +1355,8 @@ fn main() -> Result<(), slint::PlatformError> {
         shields: shields::Shields::start(settings_shields.0, settings_shields.1, settings_shields.2, settings_shields.3, settings_shields.4),
         tasks: taskman::TaskMan::new(),
         cleaner: cleanui::Cleaner::new(),
+        dev: devui::Dev::new(),
+        dev_report: None,
         #[cfg(windows)]
         clip_owner: clipboard::owner_window(),
     }));
@@ -1372,6 +1393,7 @@ fn main() -> Result<(), slint::PlatformError> {
         match page.as_str() {
             "tasks" => taskman::show(s, &u),
             "cleaner" => cleanui::on_open(s, &u),
+            "dev" => devui::on_open(s, &u),
             "home" => refresh_home(s, &u),
             "vault" => refresh_vault(s, &u),
             "history" => refresh_history(&u),
@@ -1539,6 +1561,28 @@ fn main() -> Result<(), slint::PlatformError> {
     on!(on_task_end, |s, u, pid: i32| { taskman::end(s, &u, pid) });
     on!(on_task_scan, |s, u, path: SharedString| { taskman::scan(s, &u, path) });
     on!(on_task_open, |_s, _u, path: SharedString| { taskman::open_location(path) });
+    on!(on_audit_run, |s, u| { devui::run(s, &u) });
+    on!(on_audit_reshow, |s, u| { devui::reshow(s, &u) });
+    on!(on_audit_open, |_s, _u, path: SharedString| { devui::open_file(path) });
+    on!(on_guard_toggle, |s, u, v: bool| { devui::set_guard(s, &u, v) });
+    on!(on_mcp_approve, |s, u, name: SharedString| { devui::approve(s, &u, &name) });
+    on!(on_ext_refresh, |s, u| { devui::refresh_extensions(s, &u) });
+    on!(on_dev_tab_changed, |s, u, tab: SharedString| {
+        match tab.as_str() {
+            "agents" => devui::refresh_agents(s, &u),
+            "ext" if !u.get_ext_loaded() => devui::refresh_extensions(s, &u),
+            _ => {}
+        }
+    });
+    {
+        // The folder picker runs its own message loop, so it opens without borrowing the state.
+        let w = ui.as_weak();
+        ui.on_audit_pick(move || {
+            if let Some(u) = w.upgrade() {
+                devui::pick(&u);
+            }
+        });
+    }
     on!(on_cleaner_analyze, |s, u| { cleanui::analyze(s, &u) });
     on!(on_cleaner_toggle, |s, u, id: SharedString| { cleanui::toggle(s, &u, &id) });
     on!(on_cleaner_clean, |s, u| { cleanui::clean(s, &u) });

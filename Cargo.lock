@@ -2955,6 +2955,7 @@ name = "hexward"
 version = "0.2.0"
 dependencies = [
  "anyhow",
+ "chrono",
  "clap",
  "hexward-engine",
  "hexward-update",

@@ -13,7 +13,7 @@ No account. No ads. No paid tier. Nothing leaves your PC unless you choose to se
 ![Platform](https://img.shields.io/badge/Windows-10%20%7C%2011-0B0F14?logo=windows&logoColor=4BE07A)
 ![License](https://img.shields.io/badge/license-GPL--3.0-0B0F14?labelColor=1A7F45)
 ![Rules](https://img.shields.io/badge/YARA%20rules-5%2C100%2B-0B0F14?labelColor=1A7F45)
-![Tests](https://img.shields.io/badge/tests-72%20passing-0B0F14?labelColor=1A7F45)
+![Tests](https://img.shields.io/badge/tests-92%20passing-0B0F14?labelColor=1A7F45)
 
 <img src="docs/screenshots/01-home.png" alt="Hexward home screen" width="860">
 
@@ -34,6 +34,7 @@ and covers attacks Defender wasn't built for, like weaponized shortcuts, ClickFi
 | **Detects** | 5,100+ community YARA rules, known-bad hashes, the EICAR test file, Windows file-name tricks, disguised programs, shortcut droppers, macro droppers, script droppers, HTML and SVG smuggling, ClickFix pages, zip bombs |
 | **Guards in real time** | File, process, ClickFix and stealer shields: new downloads, every program that starts, commands copied from websites, and anything that opens your browser passwords or wallets. Confirmed threats are quarantined automatically (their process stopped first); suspicious finds always wait for you |
 | **Fixes** | Quarantine (encrypted, always reversible), Delete forever (asks first), or Allow (trust that exact file). Startup items can be switched off and back on |
+| **Protects developers and AI agents** | Audits a project or GitHub repository before you install or open it, guards Claude Code's commands as they run, pins MCP servers, and keeps an eye on editor and browser extensions |
 | **Looks after the PC** | A startup manager (publisher, signature, size, search), a task manager that sorts programs into Apps, Background and Windows and won't let you end Windows or your security software, and a cleaner for browser caches, history, cookies and Windows junk |
 | **Stays honest** | Signed software is never quarantined on a pattern alone. Suspicious isn't the same as confirmed, and the app shows the difference |
 | **Stays fast** | A scan cache skips files a previous scan found clean with the same rules, so daily scans only read what changed |
@@ -45,6 +46,28 @@ and covers attacks Defender wasn't built for, like weaponized shortcuts, ClickFi
 <img src="docs/screenshots/02-scan-choose.png" alt="Choosing drives and folders to scan" width="49%">
 <img src="docs/screenshots/12-home-light.png" alt="Light theme with an update ready" width="49%">
 </div>
+
+### Developers and AI agents
+
+Supply-chain attacks (Shai-Hulud, the chalk/debug takeover, s1ngularity, GlassWorm, the tj-actions hijack) now reach
+people through `npm install`, a cloned repository, an editor extension, or an AI agent that reads the wrong file.
+Hexward reads all of it and runs none of it.
+
+<div align="center">
+<img src="docs/screenshots/16-dev-audit.png" alt="Project audit finding install scripts, agent hooks and hidden text" width="49%">
+<img src="docs/screenshots/17-dev-agents.png" alt="Hexward Guard and MCP server pinning" width="49%">
+</div>
+
+- **Project audit** (a folder or a GitHub address; repositories are cloned with hooks, submodules, LFS and fsmonitor switched off):
+  - install-time code: npm lifecycle scripts in the project and in every installed package, `setup.py`, custom Python build backends, `build.rs`, `binding.gyp`, git hooks, git settings that run programs, submodule commands
+  - AI-agent and editor traps: Claude Code hooks, "bypass permissions", broad allow rules and API redirects in `.claude/settings.json`; VS Code tasks that run when a folder opens; workspace settings that point at programs in the repository; unpinned MCP servers; prompt injection in README, AGENTS.md, CLAUDE.md and rule files, including hidden HTML comments
+  - hidden text: Unicode tag characters (decoded and shown), Trojan Source bidi controls, zero-width and variation-selector payloads
+  - GitHub Actions: actions on movable tags, known-hijacked actions, `pull_request_target` running PR code, issue and PR text pasted into shell commands, write-all tokens
+  - leaked secrets: 20 key formats (GitHub, AWS, npm, PyPI, OpenAI, Anthropic, Stripe, Slack, private keys, …) in files and in git history, always masked
+  - dependencies: packages from git or plain URLs, missing integrity hashes, any-version ranges, extra pip indexes (dependency confusion); with **Check online**, every locked version against OSV.dev's malware list and every named package against npm and PyPI, to catch names an AI invented (slopsquatting)
+- **Hexward Guard** checks each command and file edit Claude Code is about to make. It blocks download-and-run, Defender tampering, backup deletion, credential theft and agents started with safety off, and asks you first about force-pushes, publishing and edits to agent configs, git hooks or startup entries. Switch it on in the app, or run `hexward guard install`.
+- **MCP pinning** fingerprints every MCP server in Claude Code, Claude Desktop, Cursor, VS Code and Windsurf, including the script a local server runs. A new or changed server waits for your approval.
+- **Extensions**: every VS Code, Cursor, Windsurf and VSCodium extension and every Chrome, Edge, Brave, Opera, Vivaldi, Yandex and Firefox extension, rated by what it can do, scanned for GlassWorm-style hidden code, with what was added, removed or updated since last time.
 
 ### PC care
 
@@ -164,9 +187,16 @@ hexward startup --all                   # everything that starts with Windows
 hexward quarantine list
 hexward quarantine restore <id>
 hexward rules --verbose                 # what's loaded, from where, and anything left out
+hexward audit                           # audit the project in this folder
+hexward audit https://github.com/o/r    # audit a repository without running anything from it
+hexward audit D:\code\app --online      # also check dependencies against OSV.dev, npm and PyPI
+hexward guard install                   # Hexward Guard for Claude Code
+hexward guard check "npm publish"       # ask Guard about one command (exit 0 allow, 1 ask, 2 deny)
+hexward guard mcp --approve-all         # record MCP servers as they are now
+hexward extensions                      # editor and browser extensions, and what changed
 ```
 
-Add `--json` to `scan`, `startup`, `update` and `quarantine list` for machine-readable output.
+Add `--json` to `scan`, `startup`, `update`, `audit`, `extensions`, `guard mcp` and `quarantine list` for machine-readable output.
 Exit codes: `0` nothing found, `1` threats found, `2` error.
 
 ## Rule packs
@@ -209,13 +239,14 @@ flowchart LR
 
 - No account, no telemetry, no analytics.
 - Scans, history, quarantine and settings stay in `%LOCALAPPDATA%\Hexward`.
-- Network use: rule downloads (GitHub, abuse.ch) and the update check (GitHub API), and nothing else.
+- Network use: rule downloads (GitHub, abuse.ch), the update check (GitHub API), and, only when you tick **Check online** in a project audit, package names and versions sent to OSV.dev, npm and PyPI. Nothing else.
 - Any future cloud features will be opt-in and send only hash prefixes. See [docs/STRATEGY.md](docs/STRATEGY.md).
 
 ## Project layout
 
 ```
-crates/engine    scanning core: hashes, YARA-X, heuristics, containers, Office, scripts,
+crates/engine    scanning core: hashes, YARA-X, heuristics, containers, Office, scripts, project audit,
+                 Guard, MCP pinning, extensions,
                  shortcuts, signatures, quarantine, startup items, allow list, history,
                  task list, services, cleaner
 crates/cli       the hexward command
@@ -230,7 +261,7 @@ docs/            strategy and research, screenshots
 ## Testing
 
 ```bash
-cargo test --workspace      # 72 tests
+cargo test --workspace      # 92 tests
 cargo clippy --workspace --all-targets -- -D warnings
 target\debug\hexward-app.exe --shots docs\screenshots   # renders every screen to PNG
 ```
@@ -250,7 +281,7 @@ The full plan, with the research behind it, is in [ROADMAP.md](ROADMAP.md) and [
 
 **Next:**
 - an AMSI provider so PowerShell, VBScript and macros are checked as they run
-- a project and supply-chain scanner (npm/PyPI/Cargo install scripts, poisoned agent configs, hidden Unicode)
+- release anomalies in dependencies: sudden version jumps, 10× size growth, releases without a git tag
 - more formats: RAR, CAB, MSI, NSIS/Inno installers, OneNote, PDF JavaScript
 
 ## Credits

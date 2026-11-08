@@ -15,6 +15,9 @@ use serde::Serialize;
 
 use hexward_update as update;
 
+mod audit_cmd;
+mod guard_cmd;
+
 #[derive(Parser)]
 #[command(name = "hexward", version, about = "Free, open-source malware scanner. Every byte, warded.")]
 struct Cli {
@@ -50,6 +53,19 @@ enum Command {
         force: bool,
         #[arg(long)]
         json: bool,
+    },
+    /// Check a project or repository for supply-chain and AI-agent traps.
+    Audit(audit_cmd::AuditArgs),
+    /// Hexward Guard: check AI-agent commands, watch MCP servers.
+    #[command(subcommand)]
+    Guard(guard_cmd::GuardCmd),
+    /// List editor and browser extensions, flag risky ones, show what changed.
+    Extensions {
+        #[arg(long)]
+        json: bool,
+        /// Don't remember this inventory for the next comparison.
+        #[arg(long)]
+        no_save: bool,
     },
     /// Show which rules and hash lists are loaded.
     Rules {
@@ -134,6 +150,10 @@ fn main() -> ExitCode {
         Command::Quarantine(q) => cmd_quarantine(q).map(|_| false),
         Command::Update { yara, force, json } => cmd_update(yara, force, json).map(|_| false),
         Command::Rules { verbose, rules } => cmd_rules(&rules, verbose).map(|_| false),
+        Command::Audit(a) => audit_cmd::run(a),
+        // These report their own exit codes (guard check: 0 allow, 1 ask, 2 deny).
+        Command::Guard(g) => return coded(guard_cmd::run(g)),
+        Command::Extensions { json, no_save } => return coded(guard_cmd::extensions_cmd(json, no_save)),
     };
     match result {
         Ok(false) => ExitCode::from(0),
@@ -141,6 +161,16 @@ fn main() -> ExitCode {
         Err(e) => {
             eprintln!("hexward: {e:#}");
             ExitCode::from(2)
+        }
+    }
+}
+
+fn coded(r: Result<u8>) -> ExitCode {
+    match r {
+        Ok(code) => ExitCode::from(code),
+        Err(e) => {
+            eprintln!("hexward: {e:#}");
+            ExitCode::from(3)
         }
     }
 }

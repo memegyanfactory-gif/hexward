@@ -18,6 +18,10 @@ export struct StatItem { label: string, value: string }
 export struct StatusRow { name: string, value: string, tone: string }
 export struct DriveRow { root: string, label: string, info: string, selected: bool, usage: float }
 export struct AllowRow { sha: string, name: string, path: string }
+export struct AuditRow { level: string, tone: string, category: string, title: string, place: string, detail: string, evidence: string, fix: string, file: string }
+export struct McpRow { name: string, app: string, summary: string, status: string, tone: string, note: string }
+export struct GuardRow { when: string, decision: string, tone: string, subject: string, reasons: string }
+export struct ExtRow { app: string, name: string, version: string, id: string, notes: string, level: string, tone: string, change: string }
 export struct CleanItemRow { id: string, label: string, description: string, size: string, checked: bool, available: bool }
 export struct CleanGroup { id: string, name: string, icon: image, has-icon: bool, running: bool, total: string, items: [CleanItemRow] }
 export struct TaskRow { pid: int, name: string, detail: string, path: string, icon: image, has-icon: bool, cpu: string, cpu-frac: float, mem: string, mem-frac: float, protected: bool, risky: bool, confirm: bool }
@@ -75,6 +79,7 @@ export global Assets {
     in property <image> i-tasks;
     in property <image> i-sparkle;
     in property <image> i-lock;
+    in property <image> i-terminal;
 }
 
 // ---------- type ----------
@@ -741,6 +746,27 @@ export component AppWindow inherits Window {
     in property <bool> tasks-loading: true;
     in property <bool> tasks-scanning;
 
+    // Dev & AI
+    in-out property <string> dev-tab: "audit";
+    in-out property <string> audit-target;
+    in-out property <bool> audit-online;
+    in-out property <bool> audit-history: true;
+    in-out property <bool> audit-show-info;
+    in property <bool> audit-busy;
+    in property <bool> audit-done;
+    in property <string> audit-status;
+    in property <string> audit-summary;
+    in property <string> audit-state: "safe";
+    in property <[AuditRow]> audit-rows;
+    in property <bool> guard-installed;
+    in property <[GuardRow]> guard-rows;
+    in property <[McpRow]> mcp-rows;
+    in property <int> mcp-waiting;
+    in property <[ExtRow]> ext-rows;
+    in property <string> ext-summary;
+    in property <bool> ext-busy;
+    in property <bool> ext-loaded;
+
     // Cleaner
     in property <[CleanGroup]> cleaner-groups;
     in property <bool> cleaner-busy;
@@ -806,6 +832,14 @@ export component AppWindow inherits Window {
     callback startup-changed();
     callback disable-startup(int);
     callback restore-startup(string);
+    callback audit-pick();
+    callback audit-run();
+    callback audit-reshow();
+    callback audit-open(string);
+    callback guard-toggle(bool);
+    callback mcp-approve(string);
+    callback ext-refresh();
+    callback dev-tab-changed(string);
     callback cleaner-analyze();
     callback cleaner-toggle(string);
     callback cleaner-clean();
@@ -840,7 +874,7 @@ export component AppWindow inherits Window {
     callback toggle-maximize();
     callback close-window();
 
-    property <bool> moving: root.scanning || root.boot < 1 || root.flash || root.startup-busy || root.updating || root.app-update-busy || root.home-state == "alarm" || root.tasks-scanning || (root.page == "tasks" && root.tasks-loading) || root.cleaner-busy;
+    property <bool> moving: root.scanning || root.boot < 1 || root.flash || root.startup-busy || root.updating || root.app-update-busy || root.home-state == "alarm" || root.tasks-scanning || (root.page == "tasks" && root.tasks-loading) || root.cleaner-busy || root.audit-busy || root.ext-busy;
     Timer {
         interval: 33ms;
         running: root.moving;
@@ -866,7 +900,7 @@ export component AppWindow inherits Window {
         root.navigate(p);
     }
 
-    property <string> page-name: root.page == "home" ? "HOME" : root.page == "scan" ? "SCAN" : root.page == "results" ? "RESULTS" : root.page == "startup" ? "STARTUP" : root.page == "tasks" ? "TASKS" : root.page == "cleaner" ? "CLEANER" : root.page == "vault" ? "QUARANTINE" : root.page == "history" ? "HISTORY" : root.page == "settings" ? "SETTINGS" : "ABOUT";
+    property <string> page-name: root.page == "home" ? "HOME" : root.page == "scan" ? "SCAN" : root.page == "results" ? "RESULTS" : root.page == "startup" ? "STARTUP" : root.page == "tasks" ? "TASKS" : root.page == "cleaner" ? "CLEANER" : root.page == "dev" ? "DEV & AI" : root.page == "vault" ? "QUARANTINE" : root.page == "history" ? "HISTORY" : root.page == "settings" ? "SETTINGS" : "ABOUT";
 
     VerticalLayout {
         // ---------- title bar ----------
@@ -961,6 +995,7 @@ export component AppWindow inherits Window {
                     }
                     NavItem { text: "Results"; icon: Assets.i-bug; active: root.page == "results"; badge: root.open-count > 0 ? root.open-count : ""; clicked => { root.go("results"); } }
                     NavItem { text: "Startup"; icon: Assets.i-bolt; active: root.page == "startup"; clicked => { root.go("startup"); } }
+                    NavItem { text: "Dev & AI"; icon: Assets.i-terminal; active: root.page == "dev"; badge: root.mcp-waiting > 0 ? root.mcp-waiting : ""; badge-tone: Theme.amber; clicked => { root.go("dev"); } }
                     NavItem { text: "Cleaner"; icon: Assets.i-sparkle; active: root.page == "cleaner"; clicked => { root.go("cleaner"); } }
                     NavItem { text: "Tasks"; icon: Assets.i-tasks; active: root.page == "tasks"; badge: root.tasks-risky > 0 ? root.tasks-risky : ""; badge-tone: Theme.amber; clicked => { root.go("tasks"); } }
                     NavItem { text: "Quarantine"; icon: Assets.i-vault; active: root.page == "vault"; badge: root.vault-rows.length > 0 ? root.vault-rows.length : ""; badge-tone: Theme.fg-3; clicked => { root.go("vault"); } }
@@ -1409,6 +1444,185 @@ export component AppWindow inherits Window {
                                             Mono { text: d.info; color: Theme.fg-3; }
                                         }
                                         VerticalLayout { alignment: start; Btn { text: "Turn back on"; kind: "ghost"; small: true; clicked => { root.restore-startup(d.id); } } }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // DEV & AI
+                if root.page == "dev": Screen {
+                    VerticalLayout {
+                        padding: 34px;
+                        padding-top: 30px;
+                        spacing: 16px;
+                        Header { eyebrow: "DEV & AI"; title: "Code, agents and extensions"; text: "Supply-chain attacks hide in install scripts, editor tasks, agent configs and extensions. Hexward reads them; it never runs anything from a project."; }
+                        HorizontalLayout {
+                            spacing: 8px;
+                            alignment: start;
+                            Btn { text: "Project audit"; small: true; kind: root.dev-tab == "audit" ? "primary" : "ghost"; clicked => { root.dev-tab = "audit"; root.dev-tab-changed("audit"); } }
+                            Btn { text: root.mcp-waiting > 0 ? "AI agents · " + root.mcp-waiting : "AI agents"; small: true; kind: root.dev-tab == "agents" ? "primary" : "ghost"; clicked => { root.dev-tab = "agents"; root.dev-tab-changed("agents"); } }
+                            Btn { text: "Extensions"; small: true; kind: root.dev-tab == "ext" ? "primary" : "ghost"; clicked => { root.dev-tab = "ext"; root.dev-tab-changed("ext"); } }
+                        }
+
+                        // --- Project audit ---
+                        if root.dev-tab == "audit": HorizontalLayout {
+                            spacing: 10px;
+                            Rectangle {
+                                horizontal-stretch: 1;
+                                height: 40px;
+                                background: Theme.bg;
+                                Edges { x: 0; y: 0; width: parent.width; height: parent.height; edge: target-input.has-focus ? Theme.accent : Theme.line-strong; }
+                                if root.audit-target == "": Text { x: 12px; height: parent.height; vertical-alignment: center; text: "A project folder, or a GitHub address like https://github.com/owner/repo"; color: Theme.fg-3; font-family: Theme.body; font-size: 13px; }
+                                target-input := TextInput {
+                                    x: 12px;
+                                    width: parent.width - 24px;
+                                    height: parent.height;
+                                    vertical-alignment: center;
+                                    single-line: true;
+                                    text <=> root.audit-target;
+                                    font-family: Theme.mono;
+                                    font-size: 13px;
+                                    color: Theme.fg;
+                                    accepted => { root.audit-run(); }
+                                }
+                            }
+                            Btn { text: "Folder…"; kind: "ghost"; has-icon: true; icon: Assets.i-folder; clicked => { root.audit-pick(); } }
+                            Btn { text: root.audit-busy ? "Auditing…" : "Audit"; has-icon: true; icon: Assets.i-terminal; enabled: !root.audit-busy; clicked => { root.audit-run(); } }
+                        }
+                        if root.dev-tab == "audit": HorizontalLayout {
+                            spacing: 18px;
+                            alignment: start;
+                            HorizontalLayout { spacing: 8px; VerticalLayout { alignment: center; Check { checked: root.audit-history; toggled => { root.audit-history = !root.audit-history; } } } VerticalLayout { alignment: center; Body { text: "Search git history for old secrets"; font-size: 13px; wrap: no-wrap; } } }
+                            HorizontalLayout { spacing: 8px; VerticalLayout { alignment: center; Check { checked: root.audit-online; toggled => { root.audit-online = !root.audit-online; } } } VerticalLayout { alignment: center; Body { text: "Check dependencies online (sends package names to OSV, npm, PyPI)"; font-size: 13px; wrap: no-wrap; } } }
+                            HorizontalLayout { spacing: 8px; VerticalLayout { alignment: center; Check { checked: root.audit-show-info; toggled => { root.audit-show-info = !root.audit-show-info; root.audit-reshow(); } } } VerticalLayout { alignment: center; Body { text: "Show info"; font-size: 13px; wrap: no-wrap; } } }
+                        }
+                        if root.dev-tab == "audit" && (root.audit-busy || root.audit-done): HorizontalLayout {
+                            spacing: 10px;
+                            if root.audit-busy: PixelSpinner { frame: root.frame; }
+                            if !root.audit-busy: VerticalLayout { alignment: center; Chip { text: root.audit-state == "alarm" ? "HIGH RISK" : root.audit-state == "warn" ? "NEEDS A LOOK" : "LOOKS CLEAN"; tone: Theme.tone(root.audit-state); } }
+                            VerticalLayout { alignment: center; horizontal-stretch: 1; Mono { text: root.audit-busy ? root.audit-status : root.audit-summary; color: Theme.fg-2; } }
+                        }
+                        if root.dev-tab == "audit": ScrollView {
+                            vertical-stretch: 1;
+                            VerticalLayout {
+                                padding: 4px;
+                                spacing: 10px;
+                                alignment: start;
+                                if !root.audit-done && !root.audit-busy: Empty { icon: Assets.i-terminal; title: "Audit a project before you install or open it"; text: "Install scripts · agent and editor configs · hidden Unicode · GitHub Actions · leaked keys · dependencies"; }
+                                if root.audit-done && root.audit-rows.length == 0: Empty { icon: Assets.i-shield; title: "Nothing risky found"; text: "No install-time tricks, agent traps, hidden text or leaked keys."; }
+                                for f in root.audit-rows: Panel {
+                                    edge: f.tone == "alarm" ? Theme.alarm.with-alpha(0.55) : Theme.line;
+                                    HorizontalLayout {
+                                        padding: 14px;
+                                        spacing: 14px;
+                                        VerticalLayout { alignment: start; width: 76px; Chip { text: f.level; tone: Theme.tone(f.tone); } }
+                                        VerticalLayout {
+                                            spacing: 4px;
+                                            horizontal-stretch: 1;
+                                            Text { text: f.title; font-family: Theme.body; font-size: 14px; font-weight: 600; color: Theme.fg; wrap: word-wrap; }
+                                            Mono { text: f.category + (f.place != "" ? "  ·  " + f.place : ""); color: Theme.fg-3; font-size: 11px; }
+                                            Body { text: f.detail; font-size: 12px; }
+                                            if f.evidence != "": Rectangle {
+                                                background: Theme.bg;
+                                                height: ev.preferred-height + 12px;
+                                                ev := Mono { x: 8px; width: parent.width - 16px; y: 6px; text: f.evidence; color: Theme.fg-2; font-size: 11px; }
+                                            }
+                                            Body { text: "Fix: " + f.fix; font-size: 12px; color: Theme.fg; }
+                                        }
+                                        if f.file != "": VerticalLayout { alignment: start; Btn { text: "Show"; kind: "ghost"; small: true; clicked => { root.audit-open(f.file); } } }
+                                    }
+                                }
+                            }
+                        }
+
+                        // --- AI agents ---
+                        if root.dev-tab == "agents": ScrollView {
+                            vertical-stretch: 1;
+                            VerticalLayout {
+                                padding: 4px;
+                                spacing: 12px;
+                                alignment: start;
+                                Panel {
+                                    edge: root.guard-installed ? Theme.accent : Theme.line;
+                                    SettingRow {
+                                        last: true;
+                                        title: "Hexward Guard for Claude Code";
+                                        text: "Checks every command and file edit the agent is about to make. Blocks download-and-run, Defender tampering, backup deletion and credential theft; asks you before force-pushes, publishing, or edits to agent configs and git hooks.";
+                                        Switch { checked: root.guard-installed; toggled(v) => { root.guard-toggle(v); } }
+                                    }
+                                }
+                                HorizontalLayout {
+                                    Eyebrow { text: "MCP SERVERS"; vertical-alignment: center; }
+                                    Rectangle { horizontal-stretch: 1; }
+                                    if root.mcp-waiting > 0: Btn { text: "Approve all as they are now"; kind: "ghost"; small: true; clicked => { root.mcp-approve(""); } }
+                                }
+                                if root.mcp-rows.length == 0: Body { text: "No MCP servers are set up in Claude Code, Claude Desktop, Cursor, VS Code or Windsurf."; font-size: 13px; }
+                                for m in root.mcp-rows: Panel {
+                                    edge: m.tone == "alarm" ? Theme.alarm.with-alpha(0.6) : Theme.line;
+                                    HorizontalLayout {
+                                        padding: 12px;
+                                        spacing: 12px;
+                                        VerticalLayout { alignment: start; width: 96px; Chip { text: m.status; tone: Theme.tone(m.tone); } }
+                                        VerticalLayout {
+                                            spacing: 3px;
+                                            horizontal-stretch: 1;
+                                            HorizontalLayout { spacing: 8px; Text { text: m.name; font-family: Theme.body; font-size: 14px; font-weight: 600; color: Theme.fg; overflow: elide; horizontal-stretch: 0; } Mono { text: m.app; color: Theme.fg-3; font-size: 11px; vertical-alignment: center; horizontal-stretch: 1; } }
+                                            Mono { text: m.summary; }
+                                            if m.note != "": Body { text: m.note; font-size: 12px; color: m.tone == "alarm" ? Theme.alarm : Theme.amber; }
+                                        }
+                                        if m.status != "APPROVED": VerticalLayout { alignment: start; Btn { text: "Approve"; kind: "ghost"; small: true; clicked => { root.mcp-approve(m.name); } } }
+                                    }
+                                }
+                                Eyebrow { text: "RECENTLY STOPPED OR QUESTIONED"; }
+                                if root.guard-rows.length == 0: Body { text: root.guard-installed ? "Nothing yet. Guard stays quiet until an agent tries something risky." : "Turn Guard on to see what it stops here."; font-size: 13px; }
+                                for g in root.guard-rows: HorizontalLayout {
+                                    spacing: 12px;
+                                    VerticalLayout { alignment: start; width: 84px; Chip { text: g.decision; tone: Theme.tone(g.tone); } }
+                                    VerticalLayout {
+                                        spacing: 2px;
+                                        horizontal-stretch: 1;
+                                        Mono { text: g.subject; color: Theme.fg; }
+                                        Body { text: g.reasons; font-size: 12px; color: Theme.fg-3; }
+                                    }
+                                    Mono { text: g.when; color: Theme.fg-3; font-size: 11px; }
+                                }
+                            }
+                        }
+
+                        // --- Extensions ---
+                        if root.dev-tab == "ext": HorizontalLayout {
+                            spacing: 12px;
+                            if root.ext-busy: PixelSpinner { frame: root.frame; }
+                            VerticalLayout { alignment: center; horizontal-stretch: 1; Mono { text: root.ext-busy ? "Reading editor and browser extensions…" : root.ext-summary; color: Theme.fg-2; } }
+                            Btn { text: "Check again"; kind: "ghost"; small: true; enabled: !root.ext-busy; clicked => { root.ext-refresh(); } }
+                        }
+                        if root.dev-tab == "ext": ScrollView {
+                            vertical-stretch: 1;
+                            VerticalLayout {
+                                padding: 4px;
+                                spacing: 8px;
+                                alignment: start;
+                                for x in root.ext-rows: Panel {
+                                    edge: x.tone == "alarm" ? Theme.alarm.with-alpha(0.6) : x.tone == "warn" ? Theme.amber.with-alpha(0.5) : Theme.line;
+                                    fill: x.change == "REMOVED" ? Theme.bg : Theme.surface;
+                                    HorizontalLayout {
+                                        padding: 10px;
+                                        padding-left: 14px;
+                                        spacing: 12px;
+                                        VerticalLayout { alignment: start; width: 76px; if x.level != "": Chip { text: x.level; tone: Theme.tone(x.tone); } }
+                                        VerticalLayout {
+                                            spacing: 2px;
+                                            horizontal-stretch: 1;
+                                            HorizontalLayout {
+                                                spacing: 8px;
+                                                Text { text: x.name; font-family: Theme.body; font-size: 13px; font-weight: 600; color: x.change == "REMOVED" ? Theme.fg-3 : Theme.fg; overflow: elide; horizontal-stretch: 1; }
+                                                if x.change != "": Chip { text: x.change; tone: x.change == "REMOVED" ? Theme.fg-3 : Theme.signal; }
+                                            }
+                                            Mono { text: x.app + " · " + x.version + (x.id != "" ? " · " + x.id : ""); color: Theme.fg-3; font-size: 11px; }
+                                            if x.notes != "": Body { text: x.notes; font-size: 12px; }
+                                        }
                                     }
                                 }
                             }

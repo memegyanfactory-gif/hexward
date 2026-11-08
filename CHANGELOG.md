@@ -2,6 +2,16 @@
 
 Each `## version` section becomes the release notes and the first line shows in the app's update banner.
 
+## 0.3.0
+
+- Dev & AI protection: audit a project or GitHub repository for supply-chain and AI-agent traps before you install or open it
+- Finds install-time code, poisoned Claude Code and VS Code configs, prompt injection, hidden Unicode, risky GitHub Actions and leaked keys (also in git history)
+- Optional online check: known-malware package versions (OSV.dev) and package names that don't exist (slopsquatting)
+- Hexward Guard: checks Claude Code's commands and file edits before they run
+- MCP server pinning: new or changed servers wait for your approval
+- Extension inventory for editors and browsers, with risky permissions, hidden-code checks and changes since last time
+- `hexward audit`, `hexward guard` and `hexward extensions` commands
+
 ## 0.2.0
 
 - PC care: a cleaner, a task manager and a better startup manager

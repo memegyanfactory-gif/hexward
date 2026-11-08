@@ -10,6 +10,7 @@
 //! leaves you with fewer rules than before.
 
 pub mod app;
+pub mod online;
 
 use std::collections::BTreeMap;
 use std::io::Read;
