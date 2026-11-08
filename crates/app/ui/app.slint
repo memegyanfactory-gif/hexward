@@ -11,13 +11,15 @@ import "fonts/GeistMono.ttf";
 export struct PixelDot { x: int, y: int, c: int }
 export struct ThreatRow { name: string, path: string, description: string, chip: string, tone: string, selected: bool, done: bool, confirm-delete: bool }
 export struct VaultRow { id: string, name: string, path: string, info: string, confirm: bool }
-export struct StartupRow { location: string, name: string, command: string, chip: string, tone: string, fixable: bool, detail: string }
+export struct StartupRow { location: string, name: string, command: string, chip: string, tone: string, fixable: bool, detail: string, publisher: string, signed: bool, size: string, icon: image, has-icon: bool }
 export struct DisabledRow { id: string, name: string, info: string }
 export struct EventRow { when: string, title: string, detail: string, chip: string, tone: string }
 export struct StatItem { label: string, value: string }
 export struct StatusRow { name: string, value: string, tone: string }
 export struct DriveRow { root: string, label: string, info: string, selected: bool, usage: float }
 export struct AllowRow { sha: string, name: string, path: string }
+export struct CleanItemRow { id: string, label: string, description: string, size: string, checked: bool, available: bool }
+export struct CleanGroup { id: string, name: string, icon: image, has-icon: bool, running: bool, total: string, items: [CleanItemRow] }
 export struct TaskRow { pid: int, name: string, detail: string, path: string, icon: image, has-icon: bool, cpu: string, cpu-frac: float, mem: string, mem-frac: float, protected: bool, risky: bool, confirm: bool }
 
 export global Theme {
@@ -722,6 +724,8 @@ export component AppWindow inherits Window {
     in property <bool> startup-busy;
     in property <bool> startup-checked;
     in property <bool> startup-show-all;
+    in-out property <string> startup-search;
+    in-out property <string> startup-sort: "Problems";
 
     // Tasks
     in property <[TaskRow]> tasks;
@@ -736,6 +740,18 @@ export component AppWindow inherits Window {
     in property <string> tasks-mem: "…";
     in property <bool> tasks-loading: true;
     in property <bool> tasks-scanning;
+
+    // Cleaner
+    in property <[CleanGroup]> cleaner-groups;
+    in property <bool> cleaner-busy;
+    in property <bool> cleaner-analyzed;
+    in property <string> cleaner-status;
+    in property <string> cleaner-selected: "0 B";
+    in property <string> cleaner-found: "…";
+    in property <bool> cleaner-has-selection;
+    in property <int> cleaner-browsers;
+    in property <string> cleaner-blocked;
+    in-out property <bool> cleaner-confirm;
 
     // Quarantine, history, allow list
     in property <[VaultRow]> vault-rows;
@@ -787,8 +803,13 @@ export component AppWindow inherits Window {
     callback allow-one(int);
     callback check-startup();
     callback set-show-all(bool);
+    callback startup-changed();
     callback disable-startup(int);
     callback restore-startup(string);
+    callback cleaner-analyze();
+    callback cleaner-toggle(string);
+    callback cleaner-clean();
+    callback cleaner-close-browser(string);
     callback tasks-changed();
     callback task-ask-end(int);
     callback task-end(int);
@@ -819,7 +840,7 @@ export component AppWindow inherits Window {
     callback toggle-maximize();
     callback close-window();
 
-    property <bool> moving: root.scanning || root.boot < 1 || root.flash || root.startup-busy || root.updating || root.app-update-busy || root.home-state == "alarm" || root.tasks-scanning || (root.page == "tasks" && root.tasks-loading);
+    property <bool> moving: root.scanning || root.boot < 1 || root.flash || root.startup-busy || root.updating || root.app-update-busy || root.home-state == "alarm" || root.tasks-scanning || (root.page == "tasks" && root.tasks-loading) || root.cleaner-busy;
     Timer {
         interval: 33ms;
         running: root.moving;
@@ -940,6 +961,7 @@ export component AppWindow inherits Window {
                     }
                     NavItem { text: "Results"; icon: Assets.i-bug; active: root.page == "results"; badge: root.open-count > 0 ? root.open-count : ""; clicked => { root.go("results"); } }
                     NavItem { text: "Startup"; icon: Assets.i-bolt; active: root.page == "startup"; clicked => { root.go("startup"); } }
+                    NavItem { text: "Cleaner"; icon: Assets.i-sparkle; active: root.page == "cleaner"; clicked => { root.go("cleaner"); } }
                     NavItem { text: "Tasks"; icon: Assets.i-tasks; active: root.page == "tasks"; badge: root.tasks-risky > 0 ? root.tasks-risky : ""; badge-tone: Theme.amber; clicked => { root.go("tasks"); } }
                     NavItem { text: "Quarantine"; icon: Assets.i-vault; active: root.page == "vault"; badge: root.vault-rows.length > 0 ? root.vault-rows.length : ""; badge-tone: Theme.fg-3; clicked => { root.go("vault"); } }
                     NavItem { text: "History"; icon: Assets.i-clock; active: root.page == "history"; clicked => { root.go("history"); } }
@@ -1326,7 +1348,14 @@ export component AppWindow inherits Window {
                             Btn { text: root.startup-busy ? "Checking…" : root.startup-checked ? "Check again" : "Check startup items"; enabled: root.engine-ready && !root.startup-busy; has-icon: true; icon: Assets.i-bolt; clicked => { root.check-startup(); } }
                             if root.startup-checked: Btn { text: root.startup-show-all ? "Problems only" : "Show everything"; kind: "ghost"; clicked => { root.set-show-all(!root.startup-show-all); } }
                             if root.startup-busy: VerticalLayout { alignment: center; PixelSpinner { frame: root.frame; } }
-                            VerticalLayout { alignment: center; Body { text: root.startup-summary; font-size: 13px; } }
+                            VerticalLayout { alignment: center; horizontal-stretch: 1; Body { text: root.startup-summary; font-size: 13px; } }
+                        }
+                        if root.startup-checked: HorizontalLayout {
+                            spacing: 8px;
+                            VerticalLayout { alignment: center; SearchBox { text <=> root.startup-search; placeholder: "Search name, publisher, command"; width: 280px; edited => { root.startup-changed(); } } }
+                            Rectangle { horizontal-stretch: 1; }
+                            VerticalLayout { alignment: center; Mono { text: "SORT"; color: Theme.fg-3; font-size: 11px; } }
+                            Seg { options: ["Problems", "Name", "Publisher", "Size"]; value: root.startup-sort; picked(v) => { root.startup-sort = v; root.startup-changed(); } }
                         }
                         ScrollView {
                             vertical-stretch: 1;
@@ -1340,11 +1369,25 @@ export component AppWindow inherits Window {
                                     HorizontalLayout {
                                         padding: 14px;
                                         spacing: 14px;
-                                        VerticalLayout { alignment: start; width: 104px; Chip { text: r.chip; tone: Theme.tone(r.tone); } }
+                                        VerticalLayout {
+                                            alignment: start;
+                                            Rectangle {
+                                                width: 32px;
+                                                height: 32px;
+                                                if r.has-icon: Image { width: 32px; height: 32px; source: r.icon; }
+                                                if !r.has-icon: Image { x: 6px; y: 6px; width: 20px; height: 20px; source: Assets.i-bolt; colorize: Theme.fg-3; image-rendering: pixelated; }
+                                            }
+                                        }
                                         VerticalLayout {
                                             spacing: 3px;
                                             horizontal-stretch: 1;
-                                            Text { text: r.name; font-family: Theme.body; font-size: 14px; font-weight: 600; color: Theme.fg; overflow: elide; }
+                                            HorizontalLayout {
+                                                spacing: 10px;
+                                                Text { text: r.name; font-family: Theme.body; font-size: 14px; font-weight: 600; color: Theme.fg; overflow: elide; horizontal-stretch: 1; vertical-alignment: center; }
+                                                if r.size != "": VerticalLayout { alignment: center; Mono { text: r.size; color: Theme.fg-3; font-size: 11px; } }
+                                                Chip { text: r.chip; tone: Theme.tone(r.tone); }
+                                            }
+                                            if r.publisher != "": Text { text: r.publisher; font-family: Theme.body; font-size: 12px; color: r.signed ? Theme.fg-2 : Theme.amber; overflow: elide; }
                                             Mono { text: r.location; color: Theme.fg-3; font-size: 11px; }
                                             Mono { text: r.command; }
                                             if r.detail != "": Body { text: r.detail; font-size: 12px; color: Theme.tone(r.tone); }
@@ -1369,6 +1412,103 @@ export component AppWindow inherits Window {
                                     }
                                 }
                             }
+                        }
+                    }
+                }
+
+                // CLEANER
+                if root.page == "cleaner": Screen {
+                    VerticalLayout {
+                        padding: 34px;
+                        padding-top: 30px;
+                        spacing: 18px;
+                        Header { eyebrow: "CLEANER"; title: "Free up space"; text: "Browser caches and Windows leftovers, measured before anything is deleted. Bookmarks and saved passwords are never touched. Files in use are skipped."; }
+                        HorizontalLayout {
+                            spacing: 14px;
+                            Stat { label: "FOUND"; value: root.cleaner-analyzed ? root.cleaner-found : "…"; }
+                            Stat { label: "TICKED TO CLEAN"; value: root.cleaner-analyzed ? root.cleaner-selected : "…"; tone: root.cleaner-has-selection ? Theme.accent : Theme.fg; }
+                            Stat { label: "BROWSERS FOUND"; value: root.cleaner-analyzed ? root.cleaner-browsers : "…"; }
+                        }
+                        ScrollView {
+                            vertical-stretch: 1;
+                            VerticalLayout {
+                                padding: 4px;
+                                spacing: 12px;
+                                alignment: start;
+                                if !root.cleaner-analyzed: HorizontalLayout {
+                                    spacing: 12px;
+                                    alignment: start;
+                                    PixelSpinner { frame: root.frame; }
+                                    VerticalLayout { alignment: center; Body { text: "Finding browsers and measuring junk files…"; font-size: 13px; } }
+                                }
+                                for g in root.cleaner-groups: Panel {
+                                    edge: g.running ? Theme.amber.with-alpha(0.6) : Theme.line;
+                                    VerticalLayout {
+                                        padding: 14px;
+                                        padding-left: 16px;
+                                        spacing: 4px;
+                                        HorizontalLayout {
+                                            spacing: 12px;
+                                            padding-bottom: 6px;
+                                            VerticalLayout {
+                                                alignment: center;
+                                                Rectangle {
+                                                    width: 28px;
+                                                    height: 28px;
+                                                    if g.has-icon: Image { width: 28px; height: 28px; source: g.icon; }
+                                                    if !g.has-icon: Image { x: 4px; y: 4px; width: 20px; height: 20px; source: g.id == "windows" ? Assets.i-disk : Assets.i-file; colorize: Theme.fg-2; image-rendering: pixelated; }
+                                                }
+                                            }
+                                            VerticalLayout { alignment: center; Text { text: g.name; font-family: Theme.body; font-size: 15px; font-weight: 600; color: Theme.fg; } }
+                                            if g.running: VerticalLayout { alignment: center; Chip { text: "OPEN"; tone: Theme.amber; } }
+                                            Rectangle { horizontal-stretch: 1; }
+                                            if g.running: VerticalLayout { alignment: center; Btn { text: "Close " + g.name; kind: "ghost"; small: true; enabled: !root.cleaner-busy; clicked => { root.cleaner-close-browser(g.id); } } }
+                                            VerticalLayout { alignment: center; Mono { text: g.total; color: Theme.fg-2; font-size: 13px; } }
+                                        }
+                                        for it in g.items: Rectangle {
+                                            min-height: 44px;
+                                            HorizontalLayout {
+                                                spacing: 12px;
+                                                padding-top: 4px;
+                                                padding-bottom: 4px;
+                                                VerticalLayout {
+                                                    alignment: center;
+                                                    if it.available: Check { checked: it.checked; toggled => { root.cleaner-toggle(it.id); } }
+                                                    if !it.available: Rectangle { width: 20px; height: 20px; Image { x: 2px; y: 2px; width: 16px; height: 16px; source: Assets.i-lock; colorize: Theme.fg-3; image-rendering: pixelated; } }
+                                                }
+                                                VerticalLayout {
+                                                    alignment: center;
+                                                    spacing: 2px;
+                                                    horizontal-stretch: 1;
+                                                    Text { text: it.label; font-family: Theme.body; font-size: 13px; font-weight: 600; color: it.available ? Theme.fg : Theme.fg-3; }
+                                                    Body { text: it.description; font-size: 12px; color: Theme.fg-3; }
+                                                }
+                                                VerticalLayout { alignment: center; width: 170px; Mono { text: it.size; horizontal-alignment: right; color: it.checked ? Theme.fg : Theme.fg-3; } }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        if root.cleaner-blocked != "": HorizontalLayout {
+                            spacing: 10px;
+                            VerticalLayout { alignment: center; Rectangle { width: 8px; height: 8px; background: Theme.amber; } }
+                            Body { text: root.cleaner-blocked; font-size: 13px; color: Theme.amber; }
+                        }
+                        if !root.cleaner-confirm: HorizontalLayout {
+                            spacing: 14px;
+                            alignment: start;
+                            Btn { text: "Clean " + root.cleaner-selected; has-icon: true; icon: Assets.i-sparkle; enabled: root.cleaner-analyzed && root.cleaner-has-selection && !root.cleaner-busy; clicked => { root.cleaner-confirm = true; } }
+                            Btn { text: "Measure again"; kind: "ghost"; enabled: !root.cleaner-busy; clicked => { root.cleaner-analyze(); } }
+                            if root.cleaner-busy: VerticalLayout { alignment: center; PixelSpinner { frame: root.frame; } }
+                            VerticalLayout { alignment: center; Mono { text: root.cleaner-status; color: Theme.fg-3; } }
+                        }
+                        if root.cleaner-confirm: HorizontalLayout {
+                            spacing: 14px;
+                            alignment: start;
+                            VerticalLayout { alignment: center; Body { text: "Delete " + root.cleaner-selected + " of ticked files? This can't be undone."; font-size: 13px; color: Theme.fg; wrap: no-wrap; } }
+                            Btn { text: "Clean now"; kind: "danger"; clicked => { root.cleaner-clean(); } }
+                            Btn { text: "Cancel"; kind: "ghost"; clicked => { root.cleaner-confirm = false; } }
                         }
                     }
                 }

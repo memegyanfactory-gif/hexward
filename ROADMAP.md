@@ -63,7 +63,7 @@ here is what updates the page.
 Startup manager
 - [x] List and scan everything that starts with Windows (Run keys, Startup folders, tasks, services, Winlogon)
 - [x] Switch entries off and back on with undo (Run keys, Startup folders)
-- [ ] Every entry with publisher, signature status and startup impact, sorted and searchable
+- [x] Every entry with publisher, signature status, size and icon, sorted and searchable
 - [ ] Scheduled tasks and services on/off (asks for admin only when needed)
 
 Task manager
@@ -73,11 +73,11 @@ Task manager
 - [x] Unsigned programs running from Temp or Downloads highlighted
 
 Cleaner
-- [ ] Detect installed browsers (Chrome, Edge, Firefox, Brave, Opera, Opera GX, Vivaldi, Yandex) and show their own icons
-- [ ] Tick boxes per browser: cache, history, cookies, download list (cache ticked by default; history and cookies opt-in)
-- [ ] Windows: temp files, recycle bin, thumbnail cache, crash dumps, old logs
-- [ ] Shows how much space each item frees before anything is deleted; skips files in use
-- [ ] Closes or waits for a running browser before cleaning it; cleaning history in History
+- [x] Detect installed browsers (Chrome, Edge, Firefox, Brave, Opera, Opera GX, Vivaldi, Yandex) and show their own icons
+- [x] Tick boxes per browser: cache, history and download list, cookies (cache ticked by default; history and cookies opt-in; remembered)
+- [x] Windows: temp files (older than a day), recycle bin, thumbnail cache, crash dumps and error reports, shader caches
+- [x] Shows how much space each item frees before anything is deleted; skips files in use
+- [x] Skips an open browser, or closes it politely on request (no force); every clean logged in History
 
 ## Phase 3 · Developer, supply-chain and AI-agent protection (our edge)
 

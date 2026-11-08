@@ -13,7 +13,7 @@ No account. No ads. No paid tier. Nothing leaves your PC unless you choose to se
 ![Platform](https://img.shields.io/badge/Windows-10%20%7C%2011-0B0F14?logo=windows&logoColor=4BE07A)
 ![License](https://img.shields.io/badge/license-GPL--3.0-0B0F14?labelColor=1A7F45)
 ![Rules](https://img.shields.io/badge/YARA%20rules-5%2C100%2B-0B0F14?labelColor=1A7F45)
-![Tests](https://img.shields.io/badge/tests-60%20passing-0B0F14?labelColor=1A7F45)
+![Tests](https://img.shields.io/badge/tests-71%20passing-0B0F14?labelColor=1A7F45)
 
 <img src="docs/screenshots/01-home.png" alt="Hexward home screen" width="860">
 
@@ -34,6 +34,7 @@ and covers attacks Defender wasn't built for, like weaponized shortcuts, ClickFi
 | **Detects** | 5,100+ community YARA rules, known-bad hashes, the EICAR test file, Windows file-name tricks, disguised programs, shortcut droppers, macro droppers, script droppers, HTML and SVG smuggling, ClickFix pages, zip bombs |
 | **Guards in real time** | File, process, ClickFix and stealer shields: new downloads, every program that starts, commands copied from websites, and anything that opens your browser passwords or wallets. Confirmed threats are quarantined automatically (their process stopped first); suspicious finds always wait for you |
 | **Fixes** | Quarantine (encrypted, always reversible), Delete forever (asks first), or Allow (trust that exact file). Startup items can be switched off and back on |
+| **Looks after the PC** | A startup manager (publisher, signature, size, search), a task manager that sorts programs into Apps, Background and Windows and won't let you end Windows or your security software, and a cleaner for browser caches, history, cookies and Windows junk |
 | **Stays honest** | Signed software is never quarantined on a pattern alone. Suspicious isn't the same as confirmed, and the app shows the difference |
 | **Stays fast** | A scan cache skips files a previous scan found clean with the same rules, so daily scans only read what changed |
 | **Updates itself** | Signed releases from GitHub; every update's signature is checked before it installs |
@@ -44,6 +45,17 @@ and covers attacks Defender wasn't built for, like weaponized shortcuts, ClickFi
 <img src="docs/screenshots/02-scan-choose.png" alt="Choosing drives and folders to scan" width="49%">
 <img src="docs/screenshots/12-home-light.png" alt="Light theme with an update ready" width="49%">
 </div>
+
+### PC care
+
+<div align="center">
+<img src="docs/screenshots/15-cleaner.png" alt="Cleaner with browser icons and tick boxes" width="49%">
+<img src="docs/screenshots/14-tasks.png" alt="Task manager with locked Windows processes" width="49%">
+</div>
+
+- **Cleaner.** Finds Chrome, Edge, Firefox, Brave, Opera, Opera GX, Vivaldi and Yandex, shows each with its own icon, and measures every item before anything is deleted. Cache is ticked by default; history, cookies and the Recycle Bin wait for you. Bookmarks and saved passwords are never touched, and Firefox history is left alone because it shares a file with bookmarks. An open browser is skipped (or closed politely, like clicking its X, if you ask). Temp files from the last 24 hours are kept, and files in use are skipped.
+- **Task manager.** Every running program with its icon, publisher, CPU and memory, grouped into Apps, Background and Windows. Windows processes and security software are locked: Hexward refuses to end them, checked again at the moment you click. Scan any running program, open its folder, or end it after a confirm step. Unsigned programs running from Temp or Downloads are highlighted. SYSTEM services are matched to their programs through the Service Control Manager, so they land in the right group without admin rights.
+- **Startup manager.** Everything that starts with Windows, scanned, with publisher, signature status, size and icon. Search and sort it, and switch entries off and back on.
 
 ---
 
@@ -204,7 +216,8 @@ flowchart LR
 
 ```
 crates/engine    scanning core: hashes, YARA-X, heuristics, containers, Office, scripts,
-                 shortcuts, signatures, quarantine, startup items, allow list, history
+                 shortcuts, signatures, quarantine, startup items, allow list, history,
+                 task list, services, cleaner
 crates/cli       the hexward command
 crates/app       the desktop app (Slint): screens, tray, notifications, self-update
 crates/update    rule packs (YARA Forge, MalwareBazaar) and signed app updates
@@ -217,7 +230,7 @@ docs/            strategy and research, screenshots
 ## Testing
 
 ```bash
-cargo test --workspace      # 60 tests
+cargo test --workspace      # 71 tests
 cargo clippy --workspace --all-targets -- -D warnings
 target\debug\hexward-app.exe --shots docs\screenshots   # renders every screen to PNG
 ```
@@ -225,7 +238,8 @@ target\debug\hexward-app.exe --shots docs\screenshots   # renders every screen t
 - **What the tests cover:** detection on harmless markers and fragment-built attack samples; real Windows files
   that must stay clean (notepad.exe, every Start-menu shortcut); and hostile inputs: zip bombs, malformed archives,
   malformed shortcuts and malformed documents.
-- **Also tested:** quarantine round trips, signature verification of updates, and the command line end to end.
+- **Also tested:** quarantine round trips, signature verification of updates, the command line end to end, the cleaner on
+  Chromium-style profiles (bookmarks must survive, files held open must be skipped), and the task manager refusing to end system processes.
 - **Never put live malware on your main PC.** Test with the harmless markers, or in an isolated virtual machine.
 
 ## Roadmap
@@ -235,7 +249,6 @@ alarms and honesty, and protecting developers and AI coding agents, which nobody
 The full plan, with the research behind it, is in [ROADMAP.md](ROADMAP.md) and [docs/STRATEGY.md](docs/STRATEGY.md).
 
 **Next:**
-- PC care: a startup manager, a task manager that protects Windows processes, and a cleaner for browsers and temp files
 - an AMSI provider so PowerShell, VBScript and macros are checked as they run
 - a project and supply-chain scanner (npm/PyPI/Cargo install scripts, poisoned agent configs, hidden Unicode)
 - more formats: RAR, CAB, MSI, NSIS/Inno installers, OneNote, PDF JavaScript

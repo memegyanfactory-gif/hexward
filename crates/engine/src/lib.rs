@@ -10,6 +10,7 @@
 pub mod allowlist;
 pub mod behavior;
 pub mod cache;
+pub mod cleaner;
 pub mod container;
 pub mod detect;
 pub mod fileinfo;

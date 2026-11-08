@@ -37,7 +37,97 @@ fn s(x: &str) -> SharedString {
     x.into()
 }
 
+/// A real program's icon when this PC has it (the shots look like the app does), else none.
+fn exe_icon(paths: &[&str]) -> (bool, slint::Image) {
+    paths
+        .iter()
+        .find_map(|p| crate::icons::file_icon(std::path::Path::new(p)))
+        .map(|px| (true, to_image(px)))
+        .unwrap_or((false, slint::Image::default()))
+}
+
+const CHROME: &[&str] = &[r"C:\Program Files\Google\Chrome\Application\chrome.exe", r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe"];
+const EDGE: &[&str] = &[r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"];
+const NOTEPAD: &[&str] = &[r"C:\Windows\System32\notepad.exe"];
+const EXPLORER: &[&str] = &[r"C:\Windows\explorer.exe"];
+
+#[allow(clippy::too_many_arguments)] // one sample row per call reads better than a builder here
+fn task(pid: i32, name: &str, detail: &str, icon: &[&str], cpu: f32, mem: &str, mem_frac: f32, protected: bool, risky: bool, confirm: bool) -> TaskRow {
+    let (has_icon, icon) = exe_icon(icon);
+    TaskRow { pid, name: s(name), detail: s(detail), path: s(r"C:\x.exe"), icon, has_icon, cpu: format!("{cpu:.1}%").into(), cpu_frac: cpu / 100.0, mem: s(mem), mem_frac, protected, risky, confirm }
+}
+
+fn clean_row(id: &str, label: &str, description: &str, size: &str, checked: bool, available: bool) -> CleanItemRow {
+    CleanItemRow { id: s(id), label: s(label), description: s(description), size: s(size), checked, available }
+}
+
+fn sample_pc_care(ui: &AppWindow) {
+    ui.set_tasks(m(vec![
+        task(1, "Google Chrome", "Google LLC · Hexward on GitHub · chrome.exe · 24 processes", CHROME, 3.4, "1.9 GB", 0.24, false, false, false),
+        task(2, "Microsoft Edge", "Microsoft Corporation · msedge.exe · 9 processes", EDGE, 0.6, "612.0 MB", 0.08, false, false, true),
+        task(3, "Notepad", "Microsoft Corporation · notes.txt - Notepad · Notepad.exe", NOTEPAD, 0.0, "38.2 MB", 0.01, false, false, false),
+        task(4, "free-robux-setup.exe", "No publisher · free-robux-setup.exe", &[], 12.5, "88.0 MB", 0.02, false, true, false),
+        task(5, "Windows Explorer", "Microsoft Corporation · Downloads · explorer.exe", EXPLORER, 0.4, "201.5 MB", 0.03, true, false, false),
+    ]));
+    ui.set_tasks_n_apps(5);
+    ui.set_tasks_n_background(47);
+    ui.set_tasks_n_windows(61);
+    ui.set_tasks_risky(1);
+    ui.set_tasks_cpu(s("17%"));
+    ui.set_tasks_mem(s("11.2 GB of 31.9 GB"));
+    ui.set_tasks_loading(false);
+    let (ci, cicon) = exe_icon(CHROME);
+    let (ei, eicon) = exe_icon(EDGE);
+    ui.set_cleaner_groups(m(vec![
+        CleanGroup {
+            id: s("chrome"),
+            name: s("Google Chrome"),
+            icon: cicon,
+            has_icon: ci,
+            running: false,
+            total: s("2.1 GB"),
+            items: m(vec![
+                clean_row("chrome:cache", "Cache", "Copies of web pages and images. Safe to clear; sites load a little slower the first time.", "2.1 GB · 21,774 files", true, true),
+                clean_row("chrome:history", "History and download list", "Sites you visited and the list of downloads. Bookmarks and saved passwords stay.", "40.5 MB · 16 files", false, true),
+                clean_row("chrome:cookies", "Cookies", "Signs you out of websites. Sites forget your settings.", "2.1 MB · 4 files", false, true),
+            ]),
+        },
+        CleanGroup {
+            id: s("edge"),
+            name: s("Microsoft Edge"),
+            icon: eicon,
+            has_icon: ei,
+            running: true,
+            total: s("873.9 MB"),
+            items: m(vec![
+                clean_row("edge:cache", "Cache", "Copies of web pages and images. Safe to clear; sites load a little slower the first time.", "850.1 MB · 11,576 files", true, true),
+                clean_row("edge:history", "History and download list", "Sites you visited and the list of downloads. Bookmarks and saved passwords stay.", "22.9 MB · 8 files", false, true),
+            ]),
+        },
+        CleanGroup {
+            id: s("windows"),
+            name: s("Windows"),
+            icon: slint::Image::default(),
+            has_icon: false,
+            running: false,
+            total: s("14.3 GB"),
+            items: m(vec![
+                clean_row("windows:temp", "Temporary files", "Leftovers from installers and apps. Anything from the last 24 hours is kept.", "6.9 GB · 35,458 files", true, true),
+                clean_row("windows:dumps", "Crash dumps and error reports", "Saved after a program or Windows crashed. Only useful to developers.", "3.4 GB · 67 files", true, true),
+                clean_row("windows:recycle", "Recycle Bin", "Empties the Recycle Bin. Those files are gone for good.", "341.8 MB · 51 files", false, true),
+            ]),
+        },
+    ]));
+    ui.set_cleaner_analyzed(true);
+    ui.set_cleaner_found(s("17.9 GB"));
+    ui.set_cleaner_selected(s("12.4 GB"));
+    ui.set_cleaner_has_selection(true);
+    ui.set_cleaner_browsers(3);
+    ui.set_cleaner_blocked(s("Microsoft Edge is open, so its ticked items will be skipped. Close it to include them."));
+}
+
 fn sample(ui: &AppWindow) {
+    sample_pc_care(ui);
     ui.set_version(s(env!("CARGO_PKG_VERSION")));
     ui.set_engine_ready(true);
     ui.set_engine_status(s("5,134 rules ready"));
@@ -98,7 +188,29 @@ fn sample(ui: &AppWindow) {
         tone: s("warn"),
         fixable: true,
         detail: s("The program this points to no longer exists. Usually a leftover from an uninstalled app."),
+        publisher: s(""),
+        signed: false,
+        size: s(""),
+        icon: slint::Image::default(),
+        has_icon: false,
+    }, {
+        let (ei, eicon) = exe_icon(EDGE);
+        StartupRow {
+            location: s(r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run"),
+            name: s("MicrosoftEdgeAutoLaunch"),
+            command: s(r#""C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe" --no-startup-window"#),
+            chip: s("CLEAN"),
+            tone: s("safe"),
+            fixable: true,
+            detail: s(""),
+            publisher: s("Microsoft Corporation · signed"),
+            signed: true,
+            size: s("4.1 MB"),
+            icon: eicon,
+            has_icon: ei,
+        }
     }]));
+    ui.set_startup_show_all(true);
     ui.set_disabled_rows(m(vec![DisabledRow { id: s("1"), name: s("OldUpdater"), info: s(r"HKCU\...\Run · switched off today 09:21") }]));
     ui.set_vault_rows(m(vec![
         VaultRow { id: s("9ebb353ab64f411c"), name: s("Test/Any.HashMarker!a"), path: s(r"C:\Users\sam\Downloads\demo\hash-test.bin"), info: s("Quarantined today 09:13 · 26 B · id 9ebb353ab64f411c"), confirm: false },
@@ -188,10 +300,15 @@ pub fn run(dir: PathBuf) -> Result<(), PlatformError> {
     scanning(&ui, 40);
     snap("04-scan-threat-flash")?;
     ui.set_flash(false);
+    ui.set_scanning(false);
     go("results");
     snap("05-results")?;
     go("startup");
     snap("06-startup")?;
+    go("tasks");
+    snap("14-tasks")?;
+    go("cleaner");
+    snap("15-cleaner")?;
     go("vault");
     snap("07-quarantine")?;
     go("history");

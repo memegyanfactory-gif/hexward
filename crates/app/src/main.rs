@@ -5,6 +5,7 @@
 
 #[allow(dead_code)]
 mod art;
+mod cleanui;
 mod clipboard;
 mod icons;
 mod shields;
@@ -48,6 +49,8 @@ struct Settings {
     clickfix_shield: bool,
     stealer_shield: bool,
     auto_quarantine: bool,
+    /// Cleaner items the user ticked; None until they first change one (then defaults apply).
+    cleaner_ticks: Option<Vec<String>>,
 }
 
 impl Default for Settings {
@@ -64,6 +67,7 @@ impl Default for Settings {
             clickfix_shield: true,
             stealer_shield: true,
             auto_quarantine: true,
+            cleaner_ticks: None,
         }
     }
 }
@@ -116,7 +120,16 @@ impl ScanJob {
     }
 }
 
-type StartupResult = Vec<(StartupItem, &'static str, Vec<Detection>)>;
+/// Who made a startup program, whether it's signed, how big it is, and its icon.
+#[derive(Clone, Default)]
+struct StartupMeta {
+    publisher: Option<String>,
+    signed: bool,
+    size: u64,
+    icon: Option<(u32, u32, Vec<u8>)>,
+}
+
+type StartupResult = Vec<(StartupItem, &'static str, Vec<Detection>, StartupMeta)>;
 
 struct State {
     settings: Settings,
@@ -143,6 +156,7 @@ struct State {
     window_visible: bool,
     shields: shields::Shields,
     tasks: taskman::TaskMan,
+    cleaner: cleanui::Cleaner,
     /// Message-only window that owns clipboard text Hexward writes (created on the UI thread).
     #[cfg(windows)]
     clip_owner: windows_sys::Win32::Foundation::HWND,
@@ -915,18 +929,38 @@ fn refresh_vault(st: &State, ui: &AppWindow) {
 
 fn show_startup(st: &mut State, ui: &AppWindow) {
     let all = ui.get_startup_show_all();
+    let search = ui.get_startup_search().to_lowercase();
     st.startup_visible = st
         .startup_items
         .iter()
         .enumerate()
-        .filter(|(_, (item, status, _))| all || *status == "threat" || (*status == "missing" && item.location != "Driver"))
+        .filter(|(_, (item, status, _, meta))| {
+            if !search.is_empty() {
+                // A search looks through everything, problems or not.
+                return [item.name.as_str(), item.command.as_str(), item.location.as_str(), meta.publisher.as_deref().unwrap_or("")].iter().any(|f| f.to_lowercase().contains(&search));
+            }
+            all || *status == "threat" || (*status == "missing" && item.location != "Driver")
+        })
         .map(|(i, _)| i)
         .collect();
+    let sort = ui.get_startup_sort().to_string();
+    let items = &st.startup_items;
+    let rank = |s: &str| match s {
+        "threat" => 0,
+        "missing" => 1,
+        _ => 2,
+    };
+    match sort.as_str() {
+        "Name" => st.startup_visible.sort_by_key(|&i| items[i].0.name.to_lowercase()),
+        "Publisher" => st.startup_visible.sort_by_key(|&i| (items[i].3.publisher.is_none(), items[i].3.publisher.clone().unwrap_or_default().to_lowercase(), items[i].0.name.to_lowercase())),
+        "Size" => st.startup_visible.sort_by_key(|&i| std::cmp::Reverse(items[i].3.size)),
+        _ => st.startup_visible.sort_by_key(|&i| (rank(items[i].1), items[i].0.name.to_lowercase())),
+    }
     let rows: Vec<StartupRow> = st
         .startup_visible
         .iter()
         .map(|&i| {
-            let (item, status, dets) = &st.startup_items[i];
+            let (item, status, dets, meta) = &st.startup_items[i];
             let (chip, tone, detail) = match *status {
                 "threat" => ("THREAT", "alarm", dets.iter().map(|d| d.name.clone()).collect::<Vec<_>>().join(", ")),
                 "missing" => ("MISSING", "warn", "The program this points to no longer exists. Usually a leftover from an uninstalled app.".into()),
@@ -942,6 +976,18 @@ fn show_startup(st: &mut State, ui: &AppWindow) {
                 tone: tone.into(),
                 fixable: item.fix.is_some(),
                 detail: detail.into(),
+                publisher: match (&meta.publisher, meta.signed) {
+                    (Some(p), true) => format!("{p} · signed"),
+                    (Some(p), false) => format!("{p} · not signed"),
+                    (None, true) => "Signed".into(),
+                    (None, false) if item.target.as_ref().is_some_and(|t| t.is_file()) => "Unknown publisher · not signed".into(),
+                    _ => String::new(),
+                }
+                .into(),
+                signed: meta.signed,
+                size: if meta.size > 0 { bytes(meta.size).into() } else { "".into() },
+                has_icon: meta.icon.is_some(),
+                icon: meta.icon.clone().map(to_image).unwrap_or_default(),
             }
         })
         .collect();
@@ -960,6 +1006,7 @@ fn check_startup(st: &mut State, ui: &AppWindow) {
     let out = st.startup_slot.clone();
     ui.set_startup_busy(true);
     std::thread::spawn(move || {
+        icons::init_thread();
         let mut scanner = engine.rules().scanner();
         let rows: StartupResult = startup::list_startup_items()
             .into_iter()
@@ -973,7 +1020,16 @@ fn check_startup(st: &mut State, ui: &AppWindow) {
                     },
                     _ => ("missing", Vec::new()),
                 };
-                (item, status, dets)
+                let meta = match &item.target {
+                    Some(t) if t.is_file() => StartupMeta {
+                        publisher: hexward_engine::fileinfo::company(t),
+                        signed: hexward_engine::sig::has_valid_signature(t),
+                        size: std::fs::metadata(t).map(|m| m.len()).unwrap_or(0),
+                        icon: icons::file_icon(t),
+                    },
+                    _ => StartupMeta::default(),
+                };
+                (item, status, dets, meta)
             })
             .collect();
         if let Ok(mut g) = out.lock() {
@@ -1094,6 +1150,7 @@ fn tick(st: &mut State, ui: &AppWindow) {
     }
     tick_scan(st, ui);
     taskman::tick(st, ui);
+    cleanui::tick(st, ui);
     for ev in st.shields.drain() {
         shield_hit(st, ui, ev);
     }
@@ -1254,6 +1311,7 @@ fn main() -> Result<(), slint::PlatformError> {
         window_visible: true,
         shields: shields::Shields::start(settings_shields.0, settings_shields.1, settings_shields.2, settings_shields.3, settings_shields.4),
         tasks: taskman::TaskMan::new(),
+        cleaner: cleanui::Cleaner::new(),
         #[cfg(windows)]
         clip_owner: clipboard::owner_window(),
     }));
@@ -1289,6 +1347,7 @@ fn main() -> Result<(), slint::PlatformError> {
         s.tasks.set_active(page == "tasks");
         match page.as_str() {
             "tasks" => taskman::show(s, &u),
+            "cleaner" => cleanui::on_open(s, &u),
             "home" => refresh_home(s, &u),
             "vault" => refresh_vault(s, &u),
             "history" => refresh_history(&u),
@@ -1391,6 +1450,7 @@ fn main() -> Result<(), slint::PlatformError> {
         }
     });
     on!(on_check_startup, |s, u| { check_startup(s, &u) });
+    on!(on_startup_changed, |s, u| { show_startup(s, &u) });
     on!(on_set_show_all, |s, u, v: bool| {
         u.set_startup_show_all(v);
         show_startup(s, &u);
@@ -1455,6 +1515,10 @@ fn main() -> Result<(), slint::PlatformError> {
     on!(on_task_end, |s, u, pid: i32| { taskman::end(s, &u, pid) });
     on!(on_task_scan, |s, u, path: SharedString| { taskman::scan(s, &u, path) });
     on!(on_task_open, |_s, _u, path: SharedString| { taskman::open_location(path) });
+    on!(on_cleaner_analyze, |s, u| { cleanui::analyze(s, &u) });
+    on!(on_cleaner_toggle, |s, u, id: SharedString| { cleanui::toggle(s, &u, &id) });
+    on!(on_cleaner_clean, |s, u| { cleanui::clean(s, &u) });
+    on!(on_cleaner_close_browser, |s, u, id: SharedString| { cleanui::close_browser(s, &u, &id) });
     on!(on_update_rules, |s, u| { update_rules(s, &u) });
     on!(on_check_app_update, |s, u| { check_app_update(s, &u, Duration::ZERO) });
     on!(on_install_app_update, |s, u| { install_app_update(s, &u) });
