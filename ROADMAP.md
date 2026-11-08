@@ -5,7 +5,7 @@ beat them on false alarms, honesty and privacy, and protect developers and AI ag
 The reasoning and sources behind this order are in [docs/STRATEGY.md](docs/STRATEGY.md).
 Zero-cost rule: the founder pays no one (see STRATEGY §0).
 
-Every item is a checkbox. `scripts/progress.js` turns this file into the progress page, so ticking a box
+Every item is a checkbox: `[x]` done, `[~]` in progress, `[ ]` not started. `scripts/progress.js` turns this file into the progress page, so ticking a box
 here is what updates the page.
 
 ---
@@ -100,7 +100,7 @@ Cleaner
 
 ## Phase 5 · Certification (free route)
 
-- [x] Our own update signing (Ed25519) and signed GitHub releases
+- [~] Our own update signing (Ed25519) and signed GitHub releases (first release building on GitHub)
 - [ ] Free Authenticode signing through the SignPath Foundation (open-source program)
 - [ ] EULA, privacy policy, published criteria for unwanted software
 - [ ] Internal AMTSO-style tests published

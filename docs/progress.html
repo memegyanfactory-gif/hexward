@@ -5,141 +5,197 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&family=Geist+Mono:wght@400..600&family=Pixelify+Sans:wght@500..700&display=swap">
 <style>
 :root{
-  /* Layout: one column, pixel progress blocks, phase cards in a responsive grid */
+  /* Layout: hero total, phase summary table, phase cards in a two-column grid, latest work; 4px pixel grid */
   --bg:#0B0F14;--surface:#10161E;--raised:#161E28;--line:#263241;--fg:#E6EDF3;--fg2:#A3B1C2;--fg3:#7A8A9D;
-  --moss:#4BE07A;--moss-dim:#17663F;--oxide:#F0743A;--signal:#5AA9FF;--shadow:#020406;
+  --moss:#4BE07A;--amber:#FFB547;--oxide:#F0743A;--signal:#5AA9FF;--shadow:#020406;
   --pixel:"Pixelify Sans",ui-monospace,monospace;--body:"Geist",system-ui,"Segoe UI",sans-serif;--mono:"Geist Mono",ui-monospace,Consolas,monospace;
   color-scheme:dark;
 }
-@media (prefers-color-scheme: light){:root:not([data-theme="dark"]){--bg:#F3F6F2;--surface:#FFFFFF;--raised:#E8EEE9;--line:#C9D4CC;--fg:#0B0F14;--fg2:#3F4B57;--fg3:#5F6B78;--moss:#1A7F45;--moss-dim:#BFE8CB;--oxide:#C9531B;--signal:#1C64C8;--shadow:#B9C6BD;color-scheme:light}}
-:root[data-theme="light"]{--bg:#F3F6F2;--surface:#FFFFFF;--raised:#E8EEE9;--line:#C9D4CC;--fg:#0B0F14;--fg2:#3F4B57;--fg3:#5F6B78;--moss:#1A7F45;--moss-dim:#BFE8CB;--oxide:#C9531B;--signal:#1C64C8;--shadow:#B9C6BD;color-scheme:light}
-:root[data-theme="dark"]{--bg:#0B0F14;--surface:#10161E;--raised:#161E28;--line:#263241;--fg:#E6EDF3;--fg2:#A3B1C2;--fg3:#7A8A9D;--moss:#4BE07A;--moss-dim:#17663F;--oxide:#F0743A;--signal:#5AA9FF;--shadow:#020406;color-scheme:dark}
+@media (prefers-color-scheme: light){:root:not([data-theme="dark"]){--bg:#F3F6F2;--surface:#FFFFFF;--raised:#E8EEE9;--line:#C9D4CC;--fg:#0B0F14;--fg2:#3F4B57;--fg3:#5F6B78;--moss:#1A7F45;--amber:#A86A00;--oxide:#C9531B;--signal:#1C64C8;--shadow:#B9C6BD;color-scheme:light}}
+:root[data-theme="light"]{--bg:#F3F6F2;--surface:#FFFFFF;--raised:#E8EEE9;--line:#C9D4CC;--fg:#0B0F14;--fg2:#3F4B57;--fg3:#5F6B78;--moss:#1A7F45;--amber:#A86A00;--oxide:#C9531B;--signal:#1C64C8;--shadow:#B9C6BD;color-scheme:light}
+:root[data-theme="dark"]{--bg:#0B0F14;--surface:#10161E;--raised:#161E28;--line:#263241;--fg:#E6EDF3;--fg2:#A3B1C2;--fg3:#7A8A9D;--moss:#4BE07A;--amber:#FFB547;--oxide:#F0743A;--signal:#5AA9FF;--shadow:#020406;color-scheme:dark}
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.55 var(--body)}
-.wrap{max-width:1120px;margin:0 auto;padding-block:40px 64px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));display:flex;flex-direction:column;gap:32px}
+.wrap{max-width:1160px;margin:0 auto;padding-block:36px 64px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));display:flex;flex-direction:column;gap:30px}
 .eyebrow{font:500 11px/1.4 var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--fg3);margin:0}
-h1{font:700 clamp(32px,6vw,52px)/1.05 var(--pixel);margin:6px 0 0;text-wrap:balance}
-h2{font:600 22px/1.2 var(--pixel);margin:4px 0 0;text-wrap:balance}
-.hero{display:flex;flex-direction:column;gap:14px}
-.big{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap}
-.big .pct{font:700 clamp(48px,10vw,88px)/1 var(--pixel);color:var(--moss);font-variant-numeric:tabular-nums}
-.big .of{font:500 15px var(--mono);color:var(--fg2)}
-.blocks{display:grid;grid-template-columns:repeat(20,minmax(0,1fr));gap:4px;width:100%}
-.blocks i{height:14px;background:var(--raised)}
-.blocks i.on{background:var(--moss)}
-.hero .blocks i{height:22px}
-.panel{background:var(--surface);box-shadow:0 -2px 0 var(--line),0 2px 0 var(--line),-2px 0 0 var(--line),2px 0 0 var(--line);margin:2px}
-.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:22px}
-@media (max-width:760px){.grid{grid-template-columns:minmax(0,1fr)}}
-.phase{display:flex;flex-direction:column;background:var(--surface);box-shadow:0 -2px 0 var(--line),0 2px 0 var(--line),-2px 0 0 var(--line),2px 0 0 var(--line);margin:2px;min-width:0}
-.phase.active{box-shadow:0 -2px 0 var(--moss),0 2px 0 var(--moss),-2px 0 0 var(--moss),2px 0 0 var(--moss),6px 6px 0 0 var(--shadow)}
-.phase header{padding:18px 18px 14px;display:flex;flex-direction:column;gap:8px;border-bottom:2px solid var(--line)}
-.meta{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}
-.num{font:500 13px var(--mono);color:var(--fg2);font-variant-numeric:tabular-nums}
-.chip{font:500 11px/1 var(--mono);letter-spacing:.06em;text-transform:uppercase;padding:5px 8px;display:inline-flex;gap:6px;align-items:center}
+h1{font:700 clamp(30px,5.5vw,48px)/1.05 var(--pixel);margin:4px 0 0;text-wrap:balance}
+h2{font:600 21px/1.2 var(--pixel);margin:2px 0 0;text-wrap:balance}
+.panel,.phase{background:var(--surface);box-shadow:0 -2px 0 var(--line),0 2px 0 var(--line),-2px 0 0 var(--line),2px 0 0 var(--line);margin:2px;min-width:0}
+.hero{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:20px 32px;align-items:end;padding:24px}
+@media (max-width:720px){.hero{grid-template-columns:minmax(0,1fr)}}
+.stats{display:flex;gap:28px;flex-wrap:wrap}
+.stat{display:flex;flex-direction:column;gap:2px}
+.stat b{font:700 clamp(30px,6vw,52px)/1 var(--pixel);font-variant-numeric:tabular-nums}
+.stat span{font:500 11px var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--fg3)}
+.stat.done b{color:var(--moss)} .stat.wip b{color:var(--signal)} .stat.left b{color:var(--amber)}
+.bar{display:grid;grid-template-columns:repeat(40,minmax(0,1fr));gap:3px;grid-column:1/-1}
+.bar i{height:20px;background:var(--raised)}
+.bar i.done{background:var(--moss)} .bar i.wip{background:var(--signal)}
+.mini{display:grid;grid-template-columns:repeat(20,minmax(0,1fr));gap:3px}
+.mini i{height:12px;background:var(--raised)} .mini i.done{background:var(--moss)} .mini i.wip{background:var(--signal)}
+.live{display:flex;align-items:center;gap:8px;font:12px var(--mono);color:var(--fg3);flex-wrap:wrap}
+.dot{width:8px;height:8px;background:var(--fg3)} .live.on .dot{background:var(--moss);animation:blink 2s steps(1) infinite}
+@keyframes blink{50%{opacity:.25}}
+@media (prefers-reduced-motion:reduce){.live.on .dot{animation:none}}
+.chip{font:500 11px/1 var(--mono);letter-spacing:.06em;text-transform:uppercase;padding:5px 8px;display:inline-flex;gap:6px;align-items:center;white-space:nowrap}
 .chip::before{content:"";width:6px;height:6px;background:currentColor}
-.chip.complete{color:var(--moss);background:color-mix(in srgb,var(--moss) 14%,transparent)}
-.chip.active{color:var(--signal);background:color-mix(in srgb,var(--signal) 14%,transparent)}
-.chip.next{color:var(--fg3);background:color-mix(in srgb,var(--fg3) 14%,transparent)}
+.chip.done{color:var(--moss);background:color-mix(in srgb,var(--moss) 14%,transparent)}
+.chip.wip{color:var(--signal);background:color-mix(in srgb,var(--signal) 14%,transparent)}
+.chip.todo{color:var(--fg3);background:color-mix(in srgb,var(--fg3) 14%,transparent)}
+.table-wrap{overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-size:14px}
+th,td{text-align:left;padding:10px 14px;border-bottom:2px solid var(--line);white-space:nowrap}
+th{font:500 11px var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--fg3)}
+td.num{font-family:var(--mono);font-variant-numeric:tabular-nums;text-align:right}
+td.bar-cell{width:38%;min-width:160px}
+tr:last-child td{border-bottom:0}
+.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:22px}
+@media (max-width:800px){.grid{grid-template-columns:minmax(0,1fr)}}
+.phase{display:flex;flex-direction:column}
+.phase.state-wip{box-shadow:0 -2px 0 var(--signal),0 2px 0 var(--signal),-2px 0 0 var(--signal),2px 0 0 var(--signal),6px 6px 0 0 var(--shadow)}
+.phase header{padding:18px;display:flex;flex-direction:column;gap:8px;border-bottom:2px solid var(--line)}
+.meta{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;font:13px var(--mono);color:var(--fg2)}
 ul{list-style:none;margin:0;padding:12px 18px 18px;display:flex;flex-direction:column;gap:7px}
-li{display:grid;grid-template-columns:16px minmax(0,1fr);gap:10px;align-items:start;font-size:14px;color:var(--fg2)}
-li.done{color:var(--fg)}
+li{display:grid;grid-template-columns:16px minmax(0,1fr) auto;gap:10px;align-items:start;font-size:14px;color:var(--fg2)}
+li.done{color:var(--fg)} li.wip{color:var(--fg)}
 li.group{display:block;font:500 11px var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--fg3);padding-top:6px}
 .box{width:14px;height:14px;margin-top:3px;box-shadow:inset 0 0 0 2px var(--line)}
 li.done .box{background:var(--moss);box-shadow:none}
+li.wip .box{background:linear-gradient(90deg,var(--signal) 50%,transparent 50%);box-shadow:inset 0 0 0 2px var(--signal)}
+li .tag{font:500 10px var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--signal)}
 .commits{padding:16px 18px}
 .commits ul{padding:0}
 .commits li{grid-template-columns:auto auto minmax(0,1fr);gap:12px;font-size:13px;color:var(--fg)}
-.hash{font:500 12px var(--mono);color:var(--oxide)}
-.date{font:12px var(--mono);color:var(--fg3)}
-.foot{font:12px var(--mono);color:var(--fg3)}
-.foot a{color:var(--moss)}
+.sha{font:500 12px var(--mono);color:var(--oxide)} .when{font:12px var(--mono);color:var(--fg3)}
+a{color:var(--moss)}
 </style>
+
 <div class="wrap">
-  <section class="hero">
-    <p class="eyebrow">Hexward · build progress</p>
-    <h1>Every byte, warded.</h1>
-    <div class="big"><span class="pct">40%</span><span class="of">30 of 75 roadmap items done across 8 phases</span></div>
-    <span class="blocks" role="img" aria-label="30 of 75 done"><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i></span>
-    <p class="foot">Generated from ROADMAP.md at commit <b>06be64a</b> · Sun, 08 Nov 2026 05:42:34 GMT · <a href="https://github.com/memegyanfactory-gif/hexward">github.com/memegyanfactory-gif/hexward</a></p>
+  <section class="panel hero">
+    <div>
+      <p class="eyebrow">Hexward · build progress</p>
+      <h1 id="headline">Loading…</h1>
+    </div>
+    <div class="stats">
+      <div class="stat done"><b id="n-done">–</b><span>done</span></div>
+      <div class="stat wip"><b id="n-wip">–</b><span>in progress</span></div>
+      <div class="stat left"><b id="n-left">–</b><span>remaining</span></div>
+    </div>
+    <div class="bar" id="bar" role="img"></div>
+    <div class="live" id="live"><span class="dot"></span><span id="live-text"></span></div>
   </section>
-  <div class="grid">
-<section class="phase complete">
-  <header>
-    <p class="eyebrow">Phase 1</p>
-    <h2>Scanner you can trust</h2>
-    <div class="meta"><span class="chip complete">Done</span><span class="num">10 / 10 · 100%</span></div>
-    <span class="blocks" role="img" aria-label="10 of 10 done"><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i></span>
-  </header>
-  <ul><li class="done"><span class="box" aria-hidden="true"></span><span>Rust engine: SHA-256 hash lists, YARA-X rules, EICAR, file-name tricks, disguised programs</span></li><li class="done"><span class="box" aria-hidden="true"></span><span>YARA Forge rule packs (core 5,100+ / extended 10,800+), MalwareBazaar hashes with an abuse.ch key</span></li><li class="done"><span class="box" aria-hidden="true"></span><span>False-alarm guards: signed software never auto-quarantined, disabled-rule list, hunting rules = suspicious</span></li><li class="done"><span class="box" aria-hidden="true"></span><span>Encrypted, reversible quarantine; Delete only on request; Allow list by SHA-256</span></li><li class="done"><span class="box" aria-hidden="true"></span><span>Desktop app (Slint): one-piece window, pixel animation, tray, notifications, light and dark themes</span></li><li class="done"><span class="box" aria-hidden="true"></span><span>Quick, System, Full and Custom scans (pick any drives and folders)</span></li><li class="done"><span class="box" aria-hidden="true"></span><span>hexward command line with JSON output</span></li><li class="done"><span class="box" aria-hidden="true"></span><span>Signed self-update from GitHub Releases (Ed25519, version-bound signatures)</span></li><li class="done"><span class="box" aria-hidden="true"></span><span>Release pipeline: tests, lints, signing, publishing; actions pinned to commit SHAs</span></li><li class="done"><span class="box" aria-hidden="true"></span><span>README, credits, GPL-3.0 licence, brand assets, research strategy</span></li></ul>
-</section>
-<section class="phase active">
-  <header>
-    <p class="eyebrow">Phase 1.5</p>
-    <h2>Look inside everything</h2>
-    <div class="meta"><span class="chip active">In progress</span><span class="num">10 / 17 · 59%</span></div>
-    <span class="blocks" role="img" aria-label="10 of 17 done"><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i></span>
-  </header>
-  <ul><li class="done"><span class="box" aria-hidden="true"></span><span>ZIP and ZIP-based formats (Office, JAR, APK, MSIX), 7z, GZIP, TAR, nested up to 3 levels</span></li><li class="done"><span class="box" aria-hidden="true"></span><span>ISO 9660 disk images (own reader)</span></li><li class="done"><span class="box" aria-hidden="true"></span><span>Hard limits: depth, entries, bytes, compression ratio; zip-bomb detection</span></li><li class="done"><span class="box" aria-hidden="true"></span><span>Password-protected archive hiding a program; small disk image hiding a program</span></li><li class="done"><span class="box" aria-hidden="true"></span><span>Shortcut (.lnk) analysis per MS-SHLLINK: LOLBin droppers, hidden arguments, oversized payloads</span></li><li class="done"><span class="box" aria-hidden="true"></span><span>Office macros (own MS-OVBA decompressor) and files embedded in documents</span></li><li class="done"><span class="box" aria-hidden="true"></span><span>Scripts: PowerShell, batch, JS, VBS, HTA download-and-run, with base64 -enc decoding</span></li><li class="done"><span class="box" aria-hidden="true"></span><span>Web: HTML/SVG smuggling, SVG phishing redirects, ClickFix pages, .url WebDAV tricks</span></li><li class="done"><span class="box" aria-hidden="true"></span><span>Scan cache tied to the rule-set fingerprint</span></li><li class="done"><span class="box" aria-hidden="true"></span><span>False-alarm gate in the release pipeline (System32 + Program Files with the real rules)</span></li><li class="todo"><span class="box" aria-hidden="true"></span><span>RTF, PDF JavaScript, OneNote attachments</span></li><li class="todo"><span class="box" aria-hidden="true"></span><span>RAR, CAB, VHD/VHDX, IMG/UDF</span></li><li class="todo"><span class="box" aria-hidden="true"></span><span>MSI, MSIX manifests, NSIS and Inno Setup installers, UPX, PyInstaller</span></li><li class="todo"><span class="box" aria-hidden="true"></span><span>Deeper script de-obfuscation (string building, char-code arrays, nested encodings)</span></li><li class="todo"><span class="box" aria-hidden="true"></span><span>Signed, staged rule packs: canary → 10% → 100%, rollback, kill switch</span></li><li class="todo"><span class="box" aria-hidden="true"></span><span>Bigger clean corpus for the gate: NSRL Modern sets, top winget installers, popular games</span></li><li class="todo"><span class="box" aria-hidden="true"></span><span>Head-to-head benchmark against KicomAV and ClamAV in a VM, results published</span></li></ul>
-</section>
-<section class="phase active">
-  <header>
-    <p class="eyebrow">Phase 2</p>
-    <h2>Real-time protection (user mode)</h2>
-    <div class="meta"><span class="chip active">In progress</span><span class="num">6 / 12 · 50%</span></div>
-    <span class="blocks" role="img" aria-label="6 of 12 done"><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i></span>
-  </header>
-  <ul><li class="done"><span class="box" aria-hidden="true"></span><span>File shield: Downloads, Desktop and Startup folders, scanned as files finish writing</span></li><li class="done"><span class="box" aria-hidden="true"></span><span>Process shield: every program scanned as it starts</span></li><li class="done"><span class="box" aria-hidden="true"></span><span>Auto-quarantine of confirmed threats (process stopped first); suspicious finds wait for the user</span></li><li class="done"><span class="box" aria-hidden="true"></span><span>ClickFix shield: scores copied commands, replaces clear-cut lures on the clipboard</span></li><li class="done"><span class="box" aria-hidden="true"></span><span>Run-dialog (Win+R) history check for past ClickFix commands</span></li><li class="done"><span class="box" aria-hidden="true"></span><span>Stealer shield: flags non-owners opening browser, Discord, Telegram and wallet secrets (Restart Manager)</span></li><li class="todo"><span class="box" aria-hidden="true"></span><span>Background service so shields run without the app open</span></li><li class="todo"><span class="box" aria-hidden="true"></span><span>AMSI provider: PowerShell, VBScript, JScript and macros checked as they run</span></li><li class="todo"><span class="box" aria-hidden="true"></span><span>Download watcher with Mark-of-the-Web; copy it onto files extracted from archives</span></li><li class="todo"><span class="box" aria-hidden="true"></span><span>Suspicious process chains (browser/Office starting mshta, wscript, powershell -enc, regsvr32 /i:http)</span></li><li class="todo"><span class="box" aria-hidden="true"></span><span>Vulnerable-driver blocklist (Microsoft list + LOLDrivers); alert on new kernel drivers</span></li><li class="todo"><span class="box" aria-hidden="true"></span><span>Quiet mode for games; low-priority scanning; performance budget (AV-Comparatives impact ≤ 10)</span></li></ul>
-</section>
-<section class="phase active">
-  <header>
-    <p class="eyebrow">Phase 2.5</p>
-    <h2>PC care (startup, tasks, cleanup)</h2>
-    <div class="meta"><span class="chip active">In progress</span><span class="num">2 / 13 · 15%</span></div>
-    <span class="blocks" role="img" aria-label="2 of 13 done"><i class="on"></i><i class="on"></i><i class="on"></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i></span>
-  </header>
-  <ul><li class="group">Startup manager</li><li class="done"><span class="box" aria-hidden="true"></span><span>List and scan everything that starts with Windows (Run keys, Startup folders, tasks, services, Winlogon)</span></li><li class="done"><span class="box" aria-hidden="true"></span><span>Switch entries off and back on with undo (Run keys, Startup folders)</span></li><li class="todo"><span class="box" aria-hidden="true"></span><span>Every entry with publisher, signature status and startup impact, sorted and searchable</span></li><li class="todo"><span class="box" aria-hidden="true"></span><span>Scheduled tasks and services on/off (asks for admin only when needed)</span></li><li class="group">Task manager</li><li class="todo"><span class="box" aria-hidden="true"></span><span>Processes grouped: Windows (system), Apps (with a window), Background</span></li><li class="todo"><span class="box" aria-hidden="true"></span><span>Windows and security processes are protected: they can't be ended from Hexward</span></li><li class="todo"><span class="box" aria-hidden="true"></span><span>End task, scan with Hexward, open file location, live CPU and memory</span></li><li class="todo"><span class="box" aria-hidden="true"></span><span>Unsigned programs running from Temp or Downloads highlighted</span></li><li class="group">Cleaner</li><li class="todo"><span class="box" aria-hidden="true"></span><span>Detect installed browsers (Chrome, Edge, Firefox, Brave, Opera, Opera GX, Vivaldi, Yandex) and show their own icons</span></li><li class="todo"><span class="box" aria-hidden="true"></span><span>Tick boxes per browser: cache, history, cookies, download list (cache ticked by default; history and cookies opt-in)</span></li><li class="todo"><span class="box" aria-hidden="true"></span><span>Windows: temp files, recycle bin, thumbnail cache, crash dumps, old logs</span></li><li class="todo"><span class="box" aria-hidden="true"></span><span>Shows how much space each item frees before anything is deleted; skips files in use</span></li><li class="todo"><span class="box" aria-hidden="true"></span><span>Closes or waits for a running browser before cleaning it; cleaning history in History</span></li></ul>
-</section>
-<section class="phase next">
-  <header>
-    <p class="eyebrow">Phase 3</p>
-    <h2>Developer, supply-chain and AI-agent protection (our edge)</h2>
-    <div class="meta"><span class="chip next">Not started</span><span class="num">0 / 9 · 0%</span></div>
-    <span class="blocks" role="img" aria-label="0 of 9 done"><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i></span>
-  </header>
-  <ul><li class="todo"><span class="box" aria-hidden="true"></span><span>hexward audit &lt;folder or git URL&gt; and an &quot;Audit a project&quot; screen</span></li><li class="todo"><span class="box" aria-hidden="true"></span><span>Install-time code: npm pre/postinstall, setup.py/pyproject, Cargo build.rs, binding.gyp, git hooks</span></li><li class="todo"><span class="box" aria-hidden="true"></span><span>Known-malicious versions (OSV MAL-*), phantom dependencies, version jumps, 10× size growth, tagless releases</span></li><li class="todo"><span class="box" aria-hidden="true"></span><span>Agent and IDE configs: .claude/settings.json hooks, .vscode/tasks.json folder-open tasks, MCP configs</span></li><li class="todo"><span class="box" aria-hidden="true"></span><span>Hidden text for AI agents: Unicode tags, zero-width and bidi characters, prompt injection in docs</span></li><li class="todo"><span class="box" aria-hidden="true"></span><span>GitHub Actions: tags instead of SHAs, pull_request_target misuse, broad permissions</span></li><li class="todo"><span class="box" aria-hidden="true"></span><span>Leaked secrets in files and git history</span></li><li class="todo"><span class="box" aria-hidden="true"></span><span>Hexward Guard: checks agent commands before they run; MCP servers pinned by hash; user approves</span></li><li class="todo"><span class="box" aria-hidden="true"></span><span>Extension inventory: VS Code, Cursor, Open VSX and browser extensions, with version diffs</span></li></ul>
-</section>
-<section class="phase next">
-  <header>
-    <p class="eyebrow">Phase 4</p>
-    <h2>Smarter detection</h2>
-    <div class="meta"><span class="chip next">Not started</span><span class="num">0 / 4 · 0%</span></div>
-    <span class="blocks" role="img" aria-label="0 of 4 done"><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i></span>
-  </header>
-  <ul><li class="todo"><span class="box" aria-hidden="true"></span><span>Static machine learning on Windows programs (EMBER2024 models) as one signal, never alone</span></li><li class="todo"><span class="box" aria-hidden="true"></span><span>Memory scanning of running processes with YARA</span></li><li class="todo"><span class="box" aria-hidden="true"></span><span>Ransomware shield: canary files, rename/entropy bursts, shadow-copy deletion; file rollback</span></li><li class="todo"><span class="box" aria-hidden="true"></span><span>Unpacking and emulation for common packers</span></li></ul>
-</section>
-<section class="phase active">
-  <header>
-    <p class="eyebrow">Phase 5</p>
-    <h2>Certification (free route)</h2>
-    <div class="meta"><span class="chip active">In progress</span><span class="num">1 / 5 · 20%</span></div>
-    <span class="blocks" role="img" aria-label="1 of 5 done"><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i></span>
-  </header>
-  <ul><li class="done"><span class="box" aria-hidden="true"></span><span>Our own update signing (Ed25519) and signed GitHub releases</span></li><li class="todo"><span class="box" aria-hidden="true"></span><span>Free Authenticode signing through the SignPath Foundation (open-source program)</span></li><li class="todo"><span class="box" aria-hidden="true"></span><span>EULA, privacy policy, published criteria for unwanted software</span></li><li class="todo"><span class="box" aria-hidden="true"></span><span>Internal AMTSO-style tests published</span></li><li class="todo"><span class="box" aria-hidden="true"></span><span>Free lab test series: AVLab, AV-Comparatives main series, SE Labs</span></li></ul>
-</section>
-<section class="phase active">
-  <header>
-    <p class="eyebrow">Phase 6</p>
-    <h2>Cloud intelligence (opt-in) and the website</h2>
-    <div class="meta"><span class="chip active">In progress</span><span class="num">1 / 5 · 20%</span></div>
-    <span class="blocks" role="img" aria-label="1 of 5 done"><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i></span>
-  </header>
-  <ul><li class="done"><span class="box" aria-hidden="true"></span><span>hexward.onurilabs.com product page on the Onuri Labs site</span></li><li class="todo"><span class="box" aria-hidden="true"></span><span>Hash-prefix reputation lookups; certificate and signer reputation; community allow list</span></li><li class="todo"><span class="box" aria-hidden="true"></span><span>Separate opt-in for detection reports and sample upload; published retention policy</span></li><li class="todo"><span class="box" aria-hidden="true"></span><span>Dashboard: detections over time, false-alarm reports, supply-chain findings; database feeding rule packs</span></li><li class="todo"><span class="box" aria-hidden="true"></span><span>Yearly transparency report</span></li></ul>
-</section>
-  </div>
+
+  <section class="panel">
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Phase</th><th>Status</th><th>Done</th><th>Left</th><th>%</th><th>Progress</th></tr></thead>
+        <tbody id="summary"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <div class="grid" id="phases"></div>
+
   <section class="panel commits">
     <p class="eyebrow">Latest work</p>
-    <ul><li><span class="hash">06be64a</span><span class="date">2026-11-08</span><span>ClickFix and stealer shields; fix script false alarms found on a real PC; progress page</span></li><li><span class="hash">30ade54</span><span class="date">2026-11-08</span><span>Fix shortcut false alarm found by CI; cache CI builds</span></li><li><span class="hash">d2881eb</span><span class="date">2026-11-08</span><span>Real-time shields, scan cache and a false-alarm gate</span></li><li><span class="hash">a5c385b</span><span class="date">2026-11-08</span><span>Look inside everything; Office, script and shortcut analysis; README and credits</span></li><li><span class="hash">56da0f9</span><span class="date">2026-11-08</span><span>Hexward 0.1.0: Rust malware scanner, desktop app and release pipeline</span></li></ul>
+    <ul id="commits"></ul>
   </section>
 </div>
-<script type="application/json" id="progress-data">{"phases":[{"id":"Phase 1","name":"Scanner you can trust","items":[{"done":true,"text":"Rust engine: SHA-256 hash lists, YARA-X rules, EICAR, file-name tricks, disguised programs","group":""},{"done":true,"text":"YARA Forge rule packs (core 5,100+ / extended 10,800+), MalwareBazaar hashes with an abuse.ch key","group":""},{"done":true,"text":"False-alarm guards: signed software never auto-quarantined, disabled-rule list, hunting rules = suspicious","group":""},{"done":true,"text":"Encrypted, reversible quarantine; Delete only on request; Allow list by SHA-256","group":""},{"done":true,"text":"Desktop app (Slint): one-piece window, pixel animation, tray, notifications, light and dark themes","group":""},{"done":true,"text":"Quick, System, Full and Custom scans (pick any drives and folders)","group":""},{"done":true,"text":"hexward command line with JSON output","group":""},{"done":true,"text":"Signed self-update from GitHub Releases (Ed25519, version-bound signatures)","group":""},{"done":true,"text":"Release pipeline: tests, lints, signing, publishing; actions pinned to commit SHAs","group":""},{"done":true,"text":"README, credits, GPL-3.0 licence, brand assets, research strategy","group":""}]},{"id":"Phase 1.5","name":"Look inside everything","items":[{"done":true,"text":"ZIP and ZIP-based formats (Office, JAR, APK, MSIX), 7z, GZIP, TAR, nested up to 3 levels","group":""},{"done":true,"text":"ISO 9660 disk images (own reader)","group":""},{"done":true,"text":"Hard limits: depth, entries, bytes, compression ratio; zip-bomb detection","group":""},{"done":true,"text":"Password-protected archive hiding a program; small disk image hiding a program","group":""},{"done":true,"text":"Shortcut (.lnk) analysis per MS-SHLLINK: LOLBin droppers, hidden arguments, oversized payloads","group":""},{"done":true,"text":"Office macros (own MS-OVBA decompressor) and files embedded in documents","group":""},{"done":true,"text":"Scripts: PowerShell, batch, JS, VBS, HTA download-and-run, with base64 -enc decoding","group":""},{"done":true,"text":"Web: HTML/SVG smuggling, SVG phishing redirects, ClickFix pages, .url WebDAV tricks","group":""},{"done":true,"text":"Scan cache tied to the rule-set fingerprint","group":""},{"done":true,"text":"False-alarm gate in the release pipeline (System32 + Program Files with the real rules)","group":""},{"done":false,"text":"RTF, PDF JavaScript, OneNote attachments","group":""},{"done":false,"text":"RAR, CAB, VHD/VHDX, IMG/UDF","group":""},{"done":false,"text":"MSI, MSIX manifests, NSIS and Inno Setup installers, UPX, PyInstaller","group":""},{"done":false,"text":"Deeper script de-obfuscation (string building, char-code arrays, nested encodings)","group":""},{"done":false,"text":"Signed, staged rule packs: canary → 10% → 100%, rollback, kill switch","group":""},{"done":false,"text":"Bigger clean corpus for the gate: NSRL Modern sets, top winget installers, popular games","group":""},{"done":false,"text":"Head-to-head benchmark against KicomAV and ClamAV in a VM, results published","group":""}]},{"id":"Phase 2","name":"Real-time protection (user mode)","items":[{"done":true,"text":"File shield: Downloads, Desktop and Startup folders, scanned as files finish writing","group":""},{"done":true,"text":"Process shield: every program scanned as it starts","group":""},{"done":true,"text":"Auto-quarantine of confirmed threats (process stopped first); suspicious finds wait for the user","group":""},{"done":true,"text":"ClickFix shield: scores copied commands, replaces clear-cut lures on the clipboard","group":""},{"done":true,"text":"Run-dialog (Win+R) history check for past ClickFix commands","group":""},{"done":true,"text":"Stealer shield: flags non-owners opening browser, Discord, Telegram and wallet secrets (Restart Manager)","group":""},{"done":false,"text":"Background service so shields run without the app open","group":""},{"done":false,"text":"AMSI provider: PowerShell, VBScript, JScript and macros checked as they run","group":""},{"done":false,"text":"Download watcher with Mark-of-the-Web; copy it onto files extracted from archives","group":""},{"done":false,"text":"Suspicious process chains (browser/Office starting mshta, wscript, powershell -enc, regsvr32 /i:http)","group":""},{"done":false,"text":"Vulnerable-driver blocklist (Microsoft list + LOLDrivers); alert on new kernel drivers","group":""},{"done":false,"text":"Quiet mode for games; low-priority scanning; performance budget (AV-Comparatives impact ≤ 10)","group":""}]},{"id":"Phase 2.5","name":"PC care (startup, tasks, cleanup)","items":[{"done":true,"text":"List and scan everything that starts with Windows (Run keys, Startup folders, tasks, services, Winlogon)","group":"Startup manager"},{"done":true,"text":"Switch entries off and back on with undo (Run keys, Startup folders)","group":"Startup manager"},{"done":false,"text":"Every entry with publisher, signature status and startup impact, sorted and searchable","group":"Startup manager"},{"done":false,"text":"Scheduled tasks and services on/off (asks for admin only when needed)","group":"Startup manager"},{"done":false,"text":"Processes grouped: Windows (system), Apps (with a window), Background","group":"Task manager"},{"done":false,"text":"Windows and security processes are protected: they can't be ended from Hexward","group":"Task manager"},{"done":false,"text":"End task, scan with Hexward, open file location, live CPU and memory","group":"Task manager"},{"done":false,"text":"Unsigned programs running from Temp or Downloads highlighted","group":"Task manager"},{"done":false,"text":"Detect installed browsers (Chrome, Edge, Firefox, Brave, Opera, Opera GX, Vivaldi, Yandex) and show their own icons","group":"Cleaner"},{"done":false,"text":"Tick boxes per browser: cache, history, cookies, download list (cache ticked by default; history and cookies opt-in)","group":"Cleaner"},{"done":false,"text":"Windows: temp files, recycle bin, thumbnail cache, crash dumps, old logs","group":"Cleaner"},{"done":false,"text":"Shows how much space each item frees before anything is deleted; skips files in use","group":"Cleaner"},{"done":false,"text":"Closes or waits for a running browser before cleaning it; cleaning history in History","group":"Cleaner"}]},{"id":"Phase 3","name":"Developer, supply-chain and AI-agent protection (our edge)","items":[{"done":false,"text":"hexward audit \u003cfolder or git URL> and an \"Audit a project\" screen","group":""},{"done":false,"text":"Install-time code: npm pre/postinstall, setup.py/pyproject, Cargo build.rs, binding.gyp, git hooks","group":""},{"done":false,"text":"Known-malicious versions (OSV MAL-*), phantom dependencies, version jumps, 10× size growth, tagless releases","group":""},{"done":false,"text":"Agent and IDE configs: .claude/settings.json hooks, .vscode/tasks.json folder-open tasks, MCP configs","group":""},{"done":false,"text":"Hidden text for AI agents: Unicode tags, zero-width and bidi characters, prompt injection in docs","group":""},{"done":false,"text":"GitHub Actions: tags instead of SHAs, pull_request_target misuse, broad permissions","group":""},{"done":false,"text":"Leaked secrets in files and git history","group":""},{"done":false,"text":"Hexward Guard: checks agent commands before they run; MCP servers pinned by hash; user approves","group":""},{"done":false,"text":"Extension inventory: VS Code, Cursor, Open VSX and browser extensions, with version diffs","group":""}]},{"id":"Phase 4","name":"Smarter detection","items":[{"done":false,"text":"Static machine learning on Windows programs (EMBER2024 models) as one signal, never alone","group":""},{"done":false,"text":"Memory scanning of running processes with YARA","group":""},{"done":false,"text":"Ransomware shield: canary files, rename/entropy bursts, shadow-copy deletion; file rollback","group":""},{"done":false,"text":"Unpacking and emulation for common packers","group":""}]},{"id":"Phase 5","name":"Certification (free route)","items":[{"done":true,"text":"Our own update signing (Ed25519) and signed GitHub releases","group":""},{"done":false,"text":"Free Authenticode signing through the SignPath Foundation (open-source program)","group":""},{"done":false,"text":"EULA, privacy policy, published criteria for unwanted software","group":""},{"done":false,"text":"Internal AMTSO-style tests published","group":""},{"done":false,"text":"Free lab test series: AVLab, AV-Comparatives main series, SE Labs","group":""}]},{"id":"Phase 6","name":"Cloud intelligence (opt-in) and the website","items":[{"done":true,"text":"hexward.onurilabs.com product page on the Onuri Labs site","group":""},{"done":false,"text":"Hash-prefix reputation lookups; certificate and signer reputation; community allow list","group":""},{"done":false,"text":"Separate opt-in for detection reports and sample upload; published retention policy","group":""},{"done":false,"text":"Dashboard: detections over time, false-alarm reports, supply-chain findings; database feeding rule packs","group":""},{"done":false,"text":"Yearly transparency report","group":""}]}],"total":75,"done":30,"head":"06be64a","commits":[{"hash":"06be64a","date":"2026-11-08","subject":"ClickFix and stealer shields; fix script false alarms found on a real PC; progress page"},{"hash":"30ade54","date":"2026-11-08","subject":"Fix shortcut false alarm found by CI; cache CI builds"},{"hash":"d2881eb","date":"2026-11-08","subject":"Real-time shields, scan cache and a false-alarm gate"},{"hash":"a5c385b","date":"2026-11-08","subject":"Look inside everything; Office, script and shortcut analysis; README and credits"},{"hash":"56da0f9","date":"2026-11-08","subject":"Hexward 0.1.0: Rust malware scanner, desktop app and release pipeline"}],"generated":"2026-11-08T05:42:34.303Z"}</script>
+
+<script type="application/json" id="snapshot">{"roadmap":"# Hexward roadmap\n\nGoal: the best antivirus and anti-malware product available. It should match the leaders on protection,\nbeat them on false alarms, honesty and privacy, and protect developers and AI agents, which nobody else does.\nThe reasoning and sources behind this order are in [docs/STRATEGY.md](docs/STRATEGY.md).\nZero-cost rule: the founder pays no one (see STRATEGY §0).\n\nEvery item is a checkbox: `[x]` done, `[~]` in progress, `[ ]` not started. `scripts/progress.js` turns this file into the progress page, so ticking a box\nhere is what updates the page.\n\n---\n\n## Phase 1 · Scanner you can trust\n\n- [x] Rust engine: SHA-256 hash lists, YARA-X rules, EICAR, file-name tricks, disguised programs\n- [x] YARA Forge rule packs (core 5,100+ / extended 10,800+), MalwareBazaar hashes with an abuse.ch key\n- [x] False-alarm guards: signed software never auto-quarantined, disabled-rule list, hunting rules = suspicious\n- [x] Encrypted, reversible quarantine; Delete only on request; Allow list by SHA-256\n- [x] Desktop app (Slint): one-piece window, pixel animation, tray, notifications, light and dark themes\n- [x] Quick, System, Full and Custom scans (pick any drives and folders)\n- [x] `hexward` command line with JSON output\n- [x] Signed self-update from GitHub Releases (Ed25519, version-bound signatures)\n- [x] Release pipeline: tests, lints, signing, publishing; actions pinned to commit SHAs\n- [x] README, credits, GPL-3.0 licence, brand assets, research strategy\n\n## Phase 1.5 · Look inside everything\n\n- [x] ZIP and ZIP-based formats (Office, JAR, APK, MSIX), 7z, GZIP, TAR, nested up to 3 levels\n- [x] ISO 9660 disk images (own reader)\n- [x] Hard limits: depth, entries, bytes, compression ratio; zip-bomb detection\n- [x] Password-protected archive hiding a program; small disk image hiding a program\n- [x] Shortcut (.lnk) analysis per MS-SHLLINK: LOLBin droppers, hidden arguments, oversized payloads\n- [x] Office macros (own MS-OVBA decompressor) and files embedded in documents\n- [x] Scripts: PowerShell, batch, JS, VBS, HTA download-and-run, with base64 -enc decoding\n- [x] Web: HTML/SVG smuggling, SVG phishing redirects, ClickFix pages, .url WebDAV tricks\n- [x] Scan cache tied to the rule-set fingerprint\n- [x] False-alarm gate in the release pipeline (System32 + Program Files with the real rules)\n- [ ] RTF, PDF JavaScript, OneNote attachments\n- [ ] RAR, CAB, VHD/VHDX, IMG/UDF\n- [ ] MSI, MSIX manifests, NSIS and Inno Setup installers, UPX, PyInstaller\n- [ ] Deeper script de-obfuscation (string building, char-code arrays, nested encodings)\n- [ ] Signed, staged rule packs: canary → 10% → 100%, rollback, kill switch\n- [ ] Bigger clean corpus for the gate: NSRL Modern sets, top winget installers, popular games\n- [ ] Head-to-head benchmark against KicomAV and ClamAV in a VM, results published\n\n## Phase 2 · Real-time protection (user mode)\n\n- [x] File shield: Downloads, Desktop and Startup folders, scanned as files finish writing\n- [x] Process shield: every program scanned as it starts\n- [x] Auto-quarantine of confirmed threats (process stopped first); suspicious finds wait for the user\n- [x] ClickFix shield: scores copied commands, replaces clear-cut lures on the clipboard\n- [x] Run-dialog (Win+R) history check for past ClickFix commands\n- [x] Stealer shield: flags non-owners opening browser, Discord, Telegram and wallet secrets (Restart Manager)\n- [ ] Background service so shields run without the app open\n- [ ] AMSI provider: PowerShell, VBScript, JScript and macros checked as they run\n- [ ] Download watcher with Mark-of-the-Web; copy it onto files extracted from archives\n- [ ] Suspicious process chains (browser/Office starting mshta, wscript, powershell -enc, regsvr32 /i:http)\n- [ ] Vulnerable-driver blocklist (Microsoft list + LOLDrivers); alert on new kernel drivers\n- [ ] Quiet mode for games; low-priority scanning; performance budget (AV-Comparatives impact ≤ 10)\n\n## Phase 2.5 · PC care (startup, tasks, cleanup)\n\nStartup manager\n- [x] List and scan everything that starts with Windows (Run keys, Startup folders, tasks, services, Winlogon)\n- [x] Switch entries off and back on with undo (Run keys, Startup folders)\n- [ ] Every entry with publisher, signature status and startup impact, sorted and searchable\n- [ ] Scheduled tasks and services on/off (asks for admin only when needed)\n\nTask manager\n- [ ] Processes grouped: Windows (system), Apps (with a window), Background\n- [ ] Windows and security processes are protected: they can't be ended from Hexward\n- [ ] End task, scan with Hexward, open file location, live CPU and memory\n- [ ] Unsigned programs running from Temp or Downloads highlighted\n\nCleaner\n- [ ] Detect installed browsers (Chrome, Edge, Firefox, Brave, Opera, Opera GX, Vivaldi, Yandex) and show their own icons\n- [ ] Tick boxes per browser: cache, history, cookies, download list (cache ticked by default; history and cookies opt-in)\n- [ ] Windows: temp files, recycle bin, thumbnail cache, crash dumps, old logs\n- [ ] Shows how much space each item frees before anything is deleted; skips files in use\n- [ ] Closes or waits for a running browser before cleaning it; cleaning history in History\n\n## Phase 3 · Developer, supply-chain and AI-agent protection (our edge)\n\n- [ ] `hexward audit \u003cfolder or git URL>` and an \"Audit a project\" screen\n- [ ] Install-time code: npm pre/postinstall, setup.py/pyproject, Cargo build.rs, binding.gyp, git hooks\n- [ ] Known-malicious versions (OSV `MAL-*`), phantom dependencies, version jumps, 10× size growth, tagless releases\n- [ ] Agent and IDE configs: `.claude/settings.json` hooks, `.vscode/tasks.json` folder-open tasks, MCP configs\n- [ ] Hidden text for AI agents: Unicode tags, zero-width and bidi characters, prompt injection in docs\n- [ ] GitHub Actions: tags instead of SHAs, `pull_request_target` misuse, broad permissions\n- [ ] Leaked secrets in files and git history\n- [ ] Hexward Guard: checks agent commands before they run; MCP servers pinned by hash; user approves\n- [ ] Extension inventory: VS Code, Cursor, Open VSX and browser extensions, with version diffs\n\n## Phase 4 · Smarter detection\n\n- [ ] Static machine learning on Windows programs (EMBER2024 models) as one signal, never alone\n- [ ] Memory scanning of running processes with YARA\n- [ ] Ransomware shield: canary files, rename/entropy bursts, shadow-copy deletion; file rollback\n- [ ] Unpacking and emulation for common packers\n\n## Phase 5 · Certification (free route)\n\n- [~] Our own update signing (Ed25519) and signed GitHub releases (first release building on GitHub)\n- [ ] Free Authenticode signing through the SignPath Foundation (open-source program)\n- [ ] EULA, privacy policy, published criteria for unwanted software\n- [ ] Internal AMTSO-style tests published\n- [ ] Free lab test series: AVLab, AV-Comparatives main series, SE Labs\n\n## Phase 6 · Cloud intelligence (opt-in) and the website\n\n- [x] hexward.onurilabs.com product page on the Onuri Labs site\n- [ ] Hash-prefix reputation lookups; certificate and signer reputation; community allow list\n- [ ] Separate opt-in for detection reports and sample upload; published retention policy\n- [ ] Dashboard: detections over time, false-alarm reports, supply-chain findings; database feeding rule packs\n- [ ] Yearly transparency report\n\n---\n\n## False-alarm policy (the GTA Vice City rule)\n\nOld games and tools (no-CD fixes, packers, trainers) are where other antivirus products have deleted working files.\nHexward never deletes on its own:\n- Only exact known-bad hashes and high-confidence rules can be quarantined automatically\n- Unsigned old programs with a pattern match are shown as \"suspicious\", with the reason\n- Every result offers Quarantine, Delete forever or Allow; quarantine is always reversible\n- Allowed files are remembered by hash and never flagged again\n- Microsoft-signed system files are never acted on\n- Real false alarms found on real PCs become regression tests (Autodesk Maya data, Anaconda's shortcut, cached app bundles)\n","commits":[{"sha":"30f99f9","date":"2026-11-08T11:13:49+05:30","subject":"Hexward 0.1.1: ClickFix and stealer shields"},{"sha":"6707107","date":"2026-11-08T11:12:34+05:30","subject":"Regenerate progress page"},{"sha":"06be64a","date":"2026-11-08T11:12:34+05:30","subject":"ClickFix and stealer shields; fix script false alarms found on a real PC; progress page"},{"sha":"30ade54","date":"2026-11-08T10:25:15+05:30","subject":"Fix shortcut false alarm found by CI; cache CI builds"},{"sha":"d2881eb","date":"2026-11-08T10:19:51+05:30","subject":"Real-time shields, scan cache and a false-alarm gate"},{"sha":"a5c385b","date":"2026-11-08T09:43:06+05:30","subject":"Look inside everything; Office, script and shortcut analysis; README and credits"},{"sha":"56da0f9","date":"2026-11-08T08:35:34+05:30","subject":"Hexward 0.1.0: Rust malware scanner, desktop app and release pipeline"}],"head":"30f99f9","generated":"2026-11-08T05:51:47.578Z"}</script>
+<script>
+(() => {
+  const REPO = "memegyanfactory-gif/hexward";
+  const snap = JSON.parse(document.getElementById("snapshot").textContent);
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+  function parse(md) {
+    const phases = [];
+    let cur = null, group = "";
+    for (const line of md.split(/\r?\n/)) {
+      const h = line.match(/^## (Phase [^·]+)·\s*(.+)$/);
+      if (h) { cur = { id: h[1].trim(), name: h[2].trim(), items: [] }; phases.push(cur); group = ""; continue; }
+      if (line.startsWith("## ")) { cur = null; continue; }
+      if (!cur) continue;
+      const it = line.match(/^- \[( |x|~)\] (.+)$/);
+      if (it) cur.items.push({ state: it[1] === "x" ? "done" : it[1] === "~" ? "wip" : "todo", text: it[2].replace(/`([^`]+)`/g, "$1").replace(/\*\*([^*]+)\*\*/g, "$1"), group });
+      else if (/^[A-Z][A-Za-z ]+$/.test(line.trim()) && line.trim().length < 40) group = line.trim();
+    }
+    return phases;
+  }
+
+  const count = (items, s) => items.filter((i) => i.state === s).length;
+  const blocks = (items, n) => {
+    const t = items.length || 1, d = count(items, "done"), w = count(items, "wip");
+    const dn = Math.round((d / t) * n), wn = Math.min(n - dn, Math.ceil((w / t) * n));
+    return Array.from({ length: n }, (_, i) => `<i class="${i < dn ? "done" : i < dn + wn ? "wip" : ""}"></i>`).join("");
+  };
+  const ago = (iso) => {
+    const s = (Date.now() - new Date(iso)) / 1000;
+    if (s < 90) return "just now";
+    if (s < 5400) return Math.round(s / 60) + " min ago";
+    if (s < 129600) return Math.round(s / 3600) + " h ago";
+    return Math.round(s / 86400) + " days ago";
+  };
+
+  function render(md, commits, release) {
+    const phases = parse(md);
+    const all = phases.flatMap((p) => p.items);
+    const done = count(all, "done"), wip = count(all, "wip"), left = all.length - done;
+    const pct = all.length ? Math.round((done / all.length) * 100) : 0;
+    $("headline").textContent = `${pct}% built · ${left} of ${all.length} items left`;
+    $("n-done").textContent = done; $("n-wip").textContent = wip; $("n-left").textContent = left;
+    $("bar").innerHTML = blocks(all, 40);
+    $("bar").setAttribute("aria-label", `${done} of ${all.length} done`);
+
+    $("summary").innerHTML = phases.map((p) => {
+      const d = count(p.items, "done"), w = count(p.items, "wip"), t = p.items.length;
+      const st = d === t ? "done" : d + w === 0 ? "todo" : "wip";
+      return `<tr><td><b>${esc(p.id)}</b> · ${esc(p.name)}</td><td><span class="chip ${st}">${st === "done" ? "Done" : st === "wip" ? "In progress" : "Not started"}</span></td><td class="num">${d}/${t}</td><td class="num">${t - d}</td><td class="num">${t ? Math.round((d / t) * 100) : 0}%</td><td class="bar-cell"><div class="mini">${blocks(p.items, 20)}</div></td></tr>`;
+    }).join("");
+
+    $("phases").innerHTML = phases.map((p) => {
+      const d = count(p.items, "done"), w = count(p.items, "wip"), t = p.items.length;
+      const st = d === t ? "done" : d + w === 0 ? "todo" : "wip";
+      let last = null;
+      const items = p.items.map((i) => {
+        const g = i.group && i.group !== last ? `<li class="group">${esc(i.group)}</li>` : "";
+        last = i.group;
+        return `${g}<li class="${i.state}"><span class="box" aria-hidden="true"></span><span>${esc(i.text)}</span>${i.state === "wip" ? '<span class="tag">now</span>' : "<span></span>"}</li>`;
+      }).join("");
+      return `<section class="phase state-${st}"><header><p class="eyebrow">${esc(p.id)}</p><h2>${esc(p.name)}</h2>
+        <div class="meta"><span class="chip ${st}">${st === "done" ? "Done" : st === "wip" ? "In progress" : "Not started"}</span><span>${d} done · ${w} in progress · ${t - d} left</span></div>
+        <div class="mini">${blocks(p.items, 20)}</div></header><ul>${items}</ul></section>`;
+    }).join("");
+
+    $("commits").innerHTML = commits.map((c) => `<li><span class="sha">${esc(c.sha.slice(0, 7))}</span><span class="when">${esc(ago(c.date))}</span><span>${esc(c.subject)}</span></li>`).join("")
+      + (release ? `<li><span class="sha">release</span><span class="when">${esc(ago(release.date))}</span><span>Hexward ${esc(release.tag)} published · <a href="${esc(release.url)}">download</a></span></li>` : "");
+  }
+
+  function showSnapshot(note) {
+    render(snap.roadmap, snap.commits, null);
+    $("live").className = "live";
+    $("live-text").textContent = `Snapshot from commit ${snap.head || "local"} · made ${ago(snap.generated)}${note ? " · " + note : ""}`;
+  }
+
+  async function refresh() {
+    try {
+      const md = await fetch(`https://raw.githubusercontent.com/${REPO}/main/ROADMAP.md?t=${Date.now()}`, { cache: "no-store" }).then((r) => (r.ok ? r.text() : Promise.reject(r.status)));
+      const gh = (path) => fetch(`https://api.github.com/repos/${REPO}/${path}`, { cache: "no-store" }).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+      const [cs, rel] = await Promise.all([gh("commits?per_page=8"), gh("releases/latest")]);
+      const commits = Array.isArray(cs) ? cs.map((c) => ({ sha: c.sha, date: c.commit.author.date, subject: c.commit.message.split("\n")[0] })) : snap.commits;
+      const release = rel && rel.tag_name ? { tag: rel.tag_name, date: rel.published_at, url: rel.html_url } : null;
+      render(md, commits, release);
+      $("live").className = "live on";
+      $("live-text").textContent = `Live from GitHub · checked ${new Date().toLocaleTimeString()} · updates every 60 seconds`;
+    } catch {
+      showSnapshot("open docs/progress.html from the repo for live updates");
+    }
+  }
+
+  showSnapshot("");
+  refresh();
+  setInterval(refresh, 60000);
+})();
+</script>
