@@ -5,6 +5,7 @@
 
 #[allow(dead_code)]
 mod art;
+mod clipboard;
 mod shields;
 mod shots;
 
@@ -42,6 +43,8 @@ struct Settings {
     told_about_tray: bool,
     file_shield: bool,
     process_shield: bool,
+    clickfix_shield: bool,
+    stealer_shield: bool,
     auto_quarantine: bool,
 }
 
@@ -56,6 +59,8 @@ impl Default for Settings {
             told_about_tray: false,
             file_shield: true,
             process_shield: true,
+            clickfix_shield: true,
+            stealer_shield: true,
             auto_quarantine: true,
         }
     }
@@ -135,6 +140,9 @@ struct State {
     next_app_check: Instant,
     window_visible: bool,
     shields: shields::Shields,
+    /// Message-only window that owns clipboard text Hexward writes (created on the UI thread).
+    #[cfg(windows)]
+    clip_owner: windows_sys::Win32::Foundation::HWND,
 }
 
 // ---------- helpers ----------
@@ -397,6 +405,16 @@ fn refresh_home(st: &State, ui: &AppWindow) {
             tone: if st.settings.process_shield { "safe".into() } else { "warn".into() },
         },
         StatusRow {
+            name: "ClickFix shield".into(),
+            value: if st.settings.clickfix_shield { format!("{} copies checked", thousands(st.shields.stats.copies_checked.load(Ordering::Relaxed))).into() } else { "Off".into() },
+            tone: if st.settings.clickfix_shield { "safe".into() } else { "warn".into() },
+        },
+        StatusRow {
+            name: "Stealer shield".into(),
+            value: if st.settings.stealer_shield { format!("Guarding {} secret stores", st.shields.stats.stores_watched.load(Ordering::Relaxed)).into() } else { "Off".into() },
+            tone: if st.settings.stealer_shield { "safe".into() } else { "warn".into() },
+        },
+        StatusRow {
             name: "App".into(),
             value: match &st.release {
                 Some(r) => format!("{} ready", r.version).into(),
@@ -453,6 +471,8 @@ fn refresh_settings(st: &State, ui: &AppWindow) {
     ui.set_file_shield(st.settings.file_shield);
     ui.set_process_shield(st.settings.process_shield);
     ui.set_auto_quarantine(st.settings.auto_quarantine);
+    ui.set_clickfix_shield(st.settings.clickfix_shield);
+    ui.set_stealer_shield(st.settings.stealer_shield);
     ui.set_shield_info(format!("Watches {}. New and changed files are checked as soon as they finish writing.", shields::describe(&st.shields.watched)).into());
     ui.set_pack(st.settings.pack.clone().into());
     let allow: Vec<AllowRow> = allowlist::list()
@@ -831,7 +851,19 @@ fn allow_row(st: &mut State, ui: &AppWindow, i: usize) {
 }
 
 fn shield_hit(st: &mut State, ui: &AppWindow, ev: shields::ShieldEvent) {
-    let r = &ev.report;
+    #[cfg(windows)]
+    if ev.neutralize {
+        clipboard::write_text(st.clip_owner, clipboard::NEUTRALIZED);
+    }
+    let Some(r) = &ev.report else {
+        // An alert with no file (ClickFix): history, toast and notification.
+        let mut e = Event::new(EventKind::Scan, ev.shield, format!("{} · {}", ev.title, ev.action));
+        e.threats = 1;
+        history::append(e);
+        refresh_home(st, ui);
+        toast(st, ui, if ev.neutralize { "alarm" } else { "warn" }, &ev.title, &ev.action);
+        return;
+    };
     let mut row = row_for(r, !ev.quarantined && r.is_confirmed());
     row.description = format!("{}: {} {}", ev.shield, ev.action, row.description).into();
     if ev.quarantined {
@@ -1177,7 +1209,7 @@ fn main() -> Result<(), slint::PlatformError> {
     ui.set_version(env!("CARGO_PKG_VERSION").into());
 
     let settings = Settings::load();
-    let settings_shields = (settings.file_shield, settings.process_shield, settings.auto_quarantine);
+    let settings_shields = (settings.file_shield, settings.process_shield, settings.clickfix_shield, settings.stealer_shield, settings.auto_quarantine);
     ui.global::<Theme>().set_dark(settings.dark);
     let threats = Rc::new(VecModel::<ThreatRow>::default());
     ui.set_threats(ModelRc::from(threats.clone()));
@@ -1211,7 +1243,9 @@ fn main() -> Result<(), slint::PlatformError> {
         app_install_slot: slot(),
         next_app_check: Instant::now() + Duration::from_secs(6 * 3600),
         window_visible: true,
-        shields: shields::Shields::start(settings_shields.0, settings_shields.1, settings_shields.2),
+        shields: shields::Shields::start(settings_shields.0, settings_shields.1, settings_shields.2, settings_shields.3, settings_shields.4),
+        #[cfg(windows)]
+        clip_owner: clipboard::owner_window(),
     }));
     {
         let mut s = st.borrow_mut();
@@ -1436,6 +1470,20 @@ fn main() -> Result<(), slint::PlatformError> {
         s.settings.save();
         s.shields.process_on.store(v, Ordering::Relaxed);
         u.set_process_shield(v);
+        refresh_home(s, &u);
+    });
+    on!(on_set_clickfix_shield, |s, u, v: bool| {
+        s.settings.clickfix_shield = v;
+        s.settings.save();
+        s.shields.clickfix_on.store(v, Ordering::Relaxed);
+        u.set_clickfix_shield(v);
+        refresh_home(s, &u);
+    });
+    on!(on_set_stealer_shield, |s, u, v: bool| {
+        s.settings.stealer_shield = v;
+        s.settings.save();
+        s.shields.stealer_on.store(v, Ordering::Relaxed);
+        u.set_stealer_shield(v);
         refresh_home(s, &u);
     });
     on!(on_set_auto_quarantine, |s, u, v: bool| {

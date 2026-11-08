@@ -13,7 +13,7 @@ No account. No ads. No paid tier. Nothing leaves your PC unless you choose to se
 ![Platform](https://img.shields.io/badge/Windows-10%20%7C%2011-0B0F14?logo=windows&logoColor=4BE07A)
 ![License](https://img.shields.io/badge/license-GPL--3.0-0B0F14?labelColor=1A7F45)
 ![Rules](https://img.shields.io/badge/YARA%20rules-5%2C100%2B-0B0F14?labelColor=1A7F45)
-![Tests](https://img.shields.io/badge/tests-56%20passing-0B0F14?labelColor=1A7F45)
+![Tests](https://img.shields.io/badge/tests-60%20passing-0B0F14?labelColor=1A7F45)
 
 <img src="docs/screenshots/01-home.png" alt="Hexward home screen" width="860">
 
@@ -32,7 +32,7 @@ and covers attacks Defender wasn't built for, like weaponized shortcuts, ClickFi
 | **Scans** | Quick, System, Full, or Custom (tick any drives, add any folders or projects, scan them together) |
 | **Looks inside** | ZIP and everything built on it (Office, JAR, APK, MSIX), 7z, GZIP, TAR, ISO disk images, Office macros, files embedded in documents, nested 3 levels deep |
 | **Detects** | 5,100+ community YARA rules, known-bad hashes, the EICAR test file, Windows file-name tricks, disguised programs, shortcut droppers, macro droppers, script droppers, HTML and SVG smuggling, ClickFix pages, zip bombs |
-| **Guards in real time** | A file shield checks every new or changed file in Downloads, Desktop and the Startup folders; a process shield checks every program the moment it starts. Confirmed threats are quarantined automatically (their process stopped first); suspicious finds always wait for you |
+| **Guards in real time** | File, process, ClickFix and stealer shields: new downloads, every program that starts, commands copied from websites, and anything that opens your browser passwords or wallets. Confirmed threats are quarantined automatically (their process stopped first); suspicious finds always wait for you |
 | **Fixes** | Quarantine (encrypted, always reversible), Delete forever (asks first), or Allow (trust that exact file). Startup items can be switched off and back on |
 | **Stays honest** | Signed software is never quarantined on a pattern alone. Suspicious isn't the same as confirmed, and the app shows the difference |
 | **Stays fast** | A scan cache skips files a previous scan found clean with the same rules, so daily scans only read what changed |
@@ -93,6 +93,8 @@ The shields run in user mode (no kernel driver, no admin rights, no paid certifi
 
 - **File shield:** watches Downloads, Desktop and both Startup folders. A new or changed file is scanned once it stops changing, so half-finished downloads are left alone.
 - **Process shield:** every program that starts is scanned; each program file is checked once until it changes.
+- **ClickFix shield:** watches what gets copied. A command that downloads and runs code is flagged; a clear-cut "verify you're human" lure (download + run + a hidden window, encoded command or fake verification comment) is replaced on the clipboard, so pasting it into Win+R does nothing. It also checks your Win+R history for lures pasted in the past. Real install commands (like Scoop's) only get a warning.
+- **Stealer shield:** asks Windows which programs have browser passwords and cookies (Chrome, Edge, Brave, Vivaldi, Opera, Yandex, Firefox), Discord and Telegram sessions, or crypto wallets (Exodus, Electrum, Atomic) open, and flags anything that isn't the app that owns them. Unsigned programs running from Temp or Downloads are stopped and quarantined automatically; signed ones only raise a warning.
 - **What happens on a hit:** a confirmed threat is quarantined automatically, and its process is stopped first. Suspicious finds are reported and left in place. Automatic quarantine can be switched off in Settings.
 
 User mode means Hexward acts right after a file lands or a program starts, not before. Microsoft Defender keeps blocking up front, and Hexward is designed to run alongside it.
@@ -215,7 +217,7 @@ docs/            strategy and research, screenshots
 ## Testing
 
 ```bash
-cargo test --workspace      # 56 tests
+cargo test --workspace      # 60 tests
 cargo clippy --workspace --all-targets -- -D warnings
 target\debug\hexward-app.exe --shots docs\screenshots   # renders every screen to PNG
 ```
@@ -233,7 +235,7 @@ alarms and honesty, and protecting developers and AI coding agents, which nobody
 The full plan, with the research behind it, is in [ROADMAP.md](ROADMAP.md) and [docs/STRATEGY.md](docs/STRATEGY.md).
 
 **Next:**
-- shields for password stealers and ClickFix paste-and-run
+- PC care: a startup manager, a task manager that protects Windows processes, and a cleaner for browsers and temp files
 - an AMSI provider so PowerShell, VBScript and macros are checked as they run
 - a project and supply-chain scanner (npm/PyPI/Cargo install scripts, poisoned agent configs, hidden Unicode)
 - more formats: RAR, CAB, MSI, NSIS/Inno installers, OneNote, PDF JavaScript

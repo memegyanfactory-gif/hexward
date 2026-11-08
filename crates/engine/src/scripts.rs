@@ -25,14 +25,29 @@ fn det(name: &str, sev: Severity, text: String) -> Detection {
 }
 
 const FETCH: &[&str] = &[
-    "invoke-webrequest", "iwr ", "downloadstring", "downloadfile", "downloaddata", "net.webclient", "start-bitstransfer",
-    "invoke-restmethod", "irm ", "-urlcache", "bitsadmin /transfer", "curl ", "wget ", "msxml2.xmlhttp", "winhttp.winhttprequest",
+    "invoke-webrequest", "downloadstring", "downloadfile", "downloaddata", "net.webclient", "start-bitstransfer",
+    "invoke-restmethod", "-urlcache", "bitsadmin /transfer", "msxml2.xmlhttp", "winhttp.winhttprequest", "microsoft.xmlhttp",
     "xmlhttprequest", "adodb.stream",
 ];
 const RUN: &[&str] = &[
-    "iex(", "iex ", "| iex", "|iex", "invoke-expression", "start-process", "rundll32", "regsvr32", "mshta", ".run(", ".run ", ".exec(", "shellexecute",
-    "wscript.shell", "shell.application", "cmd /c", "cmd.exe /c", "powershell", ".exe",
+    "iex(", "| iex", "|iex", "invoke-expression", "start-process", "rundll32", "regsvr32", "mshta", ".run(", ".run ", "shellexecute",
+    "wscript.shell", "shell.application", "cmd /c", "cmd.exe /c", "powershell", ".exe ", ".exe\"", ".exe'", ".exe;", ".exe)",
 ];
+/// Windows Script Host objects. A .js/.vbs/.hta file without any of these is web or Node.js code,
+/// not something Windows runs on double-click (found: 383 minified app bundles in %TEMP%).
+/// Browser libraries mention ActiveXObject("Microsoft.XMLHTTP") and createObjectURL/Store, so only
+/// objects a dropper needs count: the WScript host itself, a shell, or a stream that writes files.
+const WSH: &[&str] = &["wscript.", "wscript.shell", "shell.application", "adodb.stream", "createobject(\"", "createobject('", "getobject(\"", "new-object -com"];
+
+/// Short command names only count as whole words ("irm" is inside "confirm").
+fn words(lower: &str) -> String {
+    let mut s = String::with_capacity(lower.len() + 2);
+    s.push(' ');
+    s.extend(lower.chars().map(|c| if matches!(c, '\n' | '\r' | '\t' | ';' | '(' | ')' | '|' | '&' | '{' | '}' | '"' | '\'' | '`') { ' ' } else { c }));
+    s.push(' ');
+    s
+}
+const WORD_TOKENS: &[&str] = &[" iwr ", " irm ", " curl ", " wget ", " iex "];
 
 /// Decodes PowerShell -EncodedCommand payloads (base64 of UTF-16LE) so they can be checked too.
 fn decode_encoded_commands(lower: &str, original: &str) -> Vec<String> {
@@ -152,20 +167,27 @@ pub fn checks(path: &Path, data: &[u8]) -> Vec<Detection> {
         }
     }
 
+    if matches!(e.as_str(), "js" | "jse" | "vbs" | "vbe" | "wsf" | "wsh" | "hta") && !WSH.iter().any(|k| lower.contains(k)) {
+        return out;
+    }
+
     // Scripts: download plus run, possibly hidden in a base64 PowerShell payload.
     let mut texts = vec![lower.clone()];
     texts.extend(decode_encoded_commands(&lower, &original).into_iter().map(|t| t.to_ascii_lowercase()));
     for (i, t) in texts.iter().enumerate() {
-        let fetch = any(t, FETCH);
-        let run = any(t, RUN);
+        let w = words(t);
+        let mut fetch = any(t, FETCH);
+        fetch.extend(WORD_TOKENS[..4].iter().copied().filter(|k| w.contains(k)).map(str::trim));
+        let mut run = any(t, RUN);
+        run.extend(WORD_TOKENS[4..].iter().copied().filter(|k| w.contains(k)).map(str::trim));
         if !fetch.is_empty() && !run.is_empty() {
             out.push(det(
                 if e == "hta" { "Suspicious/Script.HtaDropper!a" } else { "Suspicious/Script.DownloadExec!a" },
                 Severity::High,
                 format!(
                     "This script downloads something ({}) and runs it ({}){}. That's how most malware gets installed.",
-                    fetch[0],
-                    run[0],
+                    fetch[0].trim(),
+                    run[0].trim_matches(|c: char| matches!(c, '"' | '\x27' | ';' | ')' | ' ')),
                     if i > 0 { ", hidden inside an encoded PowerShell command" } else { "" }
                 ),
             ));
@@ -258,5 +280,14 @@ mod tests {
         assert!(names("docs.html", "<html><button onclick=\"navigator.clipboard.writeText('cargo install hexward')\">Copy</button></html>").is_empty());
         assert!(names("site.url", "[InternetShortcut]\r\nURL=https://www.rust-lang.org/\r\n").is_empty());
         assert!(names("notes.txt", "download and run").is_empty(), "plain text files aren't scripts");
+        // Found on a real PC: minified app bundles cached in %TEMP% (regex .exec(, "curl " in help text, eval, one huge line).
+        let bundle = format!(
+            "var gn=Object.defineProperty;import{{r as o}}from\"./a-eabcb7723c8a89ad5787.js\";const re=/x/;re.exec(s);const help=\"use curl or wget\";eval(code);{}",
+            "x".repeat(25_000)
+        );
+        assert!(names("35534f18.tmp.js", &bundle).is_empty());
+        // createObjectStore / createObjectURL, "confirm " and an IE-only XMLHTTP fallback in a browser library.
+        let lib = "var r=n.result.createObjectStore(q);var u=URL.createObjectURL(b);if(confirm (m)){x=new ActiveXObject(\"Microsoft.XMLHTTP\");x.run(a)}";
+        assert!(names("craw_window.js", lib).is_empty());
     }
 }

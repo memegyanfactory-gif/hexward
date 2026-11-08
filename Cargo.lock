@@ -2984,6 +2984,7 @@ dependencies = [
  "slint-build",
  "sysinfo",
  "tray-icon",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

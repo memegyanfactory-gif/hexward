@@ -687,6 +687,8 @@ export component AppWindow inherits Window {
     in property <bool> file-shield: true;
     in property <bool> process-shield: true;
     in property <bool> auto-quarantine: true;
+    in property <bool> clickfix-shield: true;
+    in property <bool> stealer-shield: true;
     in property <string> shield-info;
     in property <string> pack: "core";
     in property <bool> updating;
@@ -738,6 +740,8 @@ export component AppWindow inherits Window {
     callback set-file-shield(bool);
     callback set-process-shield(bool);
     callback set-auto-quarantine(bool);
+    callback set-clickfix-shield(bool);
+    callback set-stealer-shield(bool);
     callback set-pack(string);
     callback open-data-dir();
     callback check-app-update();
@@ -1415,6 +1419,8 @@ export component AppWindow inherits Window {
                                 VerticalLayout {
                                     SettingRow { title: "File shield"; text: root.shield-info; Switch { checked: root.file-shield; toggled(v) => { root.set-file-shield(v); } } }
                                     SettingRow { title: "Process shield"; text: "Checks every program the moment it starts. Each program file is checked once until it changes."; Switch { checked: root.process-shield; toggled(v) => { root.set-process-shield(v); } } }
+                                    SettingRow { title: "ClickFix shield"; text: "Catches fake \"verify you're human\" pages that copy a command for you to paste. Clear-cut ones are replaced on the clipboard."; Switch { checked: root.clickfix-shield; toggled(v) => { root.set-clickfix-shield(v); } } }
+                                    SettingRow { title: "Stealer shield"; text: "Alerts when a program that isn't your browser, Discord, Telegram or wallet opens their saved passwords, cookies or keys."; Switch { checked: root.stealer-shield; toggled(v) => { root.set-stealer-shield(v); } } }
                                     SettingRow {
                                         title: "Quarantine confirmed threats automatically";
                                         text: "Known-bad files and high-confidence rules only. Suspicious finds always wait for you.";

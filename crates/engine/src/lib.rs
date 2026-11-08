@@ -8,6 +8,7 @@
 //! 5. content checks (Windows programs disguised as documents or images)
 
 pub mod allowlist;
+pub mod behavior;
 pub mod cache;
 pub mod container;
 pub mod detect;
