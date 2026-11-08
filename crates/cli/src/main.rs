@@ -90,6 +90,9 @@ struct ScanArgs {
     /// File or folder to skip. Repeatable.
     #[arg(long, value_name = "PATH")]
     exclude: Vec<PathBuf>,
+    /// Check every file again, even ones a previous scan found clean.
+    #[arg(long)]
+    no_cache: bool,
     /// Print the result as JSON.
     #[arg(long)]
     json: bool,
@@ -251,7 +254,10 @@ fn cmd_scan(a: ScanArgs) -> Result<bool> {
 
     let mut excludes = a.exclude.clone();
     excludes.push(vault_dir.clone());
-    let opts = ScanOptions { max_size: a.max_size_mb * 1024 * 1024, threads: a.threads, excludes };
+    // Never scan Hexward's own data: the rule files would match the rules.
+    excludes.push(hexward_engine::data_dir());
+    let cache = (!a.no_cache).then(|| std::sync::Arc::new(hexward_engine::cache::ScanCache::open(hexward_engine::cache::ScanCache::default_path(), engine.fingerprint())));
+    let opts = ScanOptions { max_size: a.max_size_mb * 1024 * 1024, threads: a.threads, excludes, cache };
 
     if !a.json {
         println!("{} {} · {}", st.good("hexward"), env!("CARGO_PKG_VERSION"), kind);
@@ -332,6 +338,9 @@ fn cmd_scan(a: ScanArgs) -> Result<bool> {
         secs,
         thousands((summary.files_scanned as f64 / secs.max(0.001)) as u64)
     );
+    if summary.cached > 0 {
+        println!("{}", st.dim(&format!("{} of them unchanged since a previous clean scan, so they were skipped (--no-cache checks everything).", thousands(summary.cached))));
+    }
     if summary.skipped_large + summary.unreadable > 0 {
         println!(
             "{}",

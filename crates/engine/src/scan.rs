@@ -24,6 +24,7 @@ pub struct Engine {
     disabled: HashSet<String>,
     /// SHA-256 of files the user chose to trust.
     allowed: std::sync::RwLock<HashSet<[u8; 32]>>,
+    fingerprint: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -34,11 +35,13 @@ pub struct ScanOptions {
     pub threads: usize,
     /// Paths (files or folders) never scanned.
     pub excludes: Vec<PathBuf>,
+    /// Skip files already found clean by this rule set (see cache.rs).
+    pub cache: Option<std::sync::Arc<crate::cache::ScanCache>>,
 }
 
 impl Default for ScanOptions {
     fn default() -> Self {
-        ScanOptions { max_size: 64 * 1024 * 1024, threads: 0, excludes: Vec::new() }
+        ScanOptions { max_size: 64 * 1024 * 1024, threads: 0, excludes: Vec::new(), cache: None }
     }
 }
 
@@ -71,6 +74,9 @@ pub struct ScanSummary {
     pub unreadable: u64,
     pub elapsed_ms: u64,
     pub cancelled: bool,
+    /// Files skipped because the cache already knew them as clean.
+    #[serde(default)]
+    pub cached: u64,
     pub threats: Vec<FileReport>,
 }
 
@@ -78,6 +84,7 @@ pub struct ScanSummary {
 #[derive(Default)]
 pub struct Progress {
     pub files: AtomicU64,
+    pub cached: AtomicU64,
     pub bytes: AtomicU64,
     pub threats: AtomicU64,
     pub unreadable: AtomicU64,
@@ -134,25 +141,47 @@ impl Engine {
         let mut disabled = HashSet::new();
         load_disabled(&mut disabled, BUILTIN_DISABLED);
 
+        // Fingerprint of everything that decides a verdict: a change empties the scan cache.
+        use crate::cache::{FNV_START, fnv};
+        let mut fp = fnv(env!("CARGO_PKG_VERSION").as_bytes(), FNV_START);
+        fp = fnv(BUILTIN_RULES.as_bytes(), fp);
+        fp = fnv(BUILTIN_HASHES.as_bytes(), fp);
+        fp = fnv(BUILTIN_DISABLED.as_bytes(), fp);
+
         for dir in extra_dirs {
             let Ok(entries) = std::fs::read_dir(dir) else { continue };
             let mut files: Vec<PathBuf> = entries.filter_map(|e| e.ok().map(|e| e.path())).collect();
             files.sort();
             for file in files {
                 let ext = file.extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase();
+                if !matches!(ext.as_str(), "yar" | "yara" | "txt" | "csv") {
+                    continue;
+                }
+                let bytes = std::fs::read(&file)?;
+                fp = fnv(&bytes, fnv(file.to_string_lossy().as_bytes(), fp));
+                let text = String::from_utf8_lossy(&bytes).into_owned();
                 match ext.as_str() {
-                    "yar" | "yara" => sources.push((file.display().to_string(), std::fs::read_to_string(&file)?)),
-                    "txt" if file.file_name().is_some_and(|n| n.eq_ignore_ascii_case("disabled.txt")) => {
-                        load_disabled(&mut disabled, &std::fs::read_to_string(&file)?);
+                    "yar" | "yara" => sources.push((file.display().to_string(), text)),
+                    "txt" if file.file_name().is_some_and(|n| n.eq_ignore_ascii_case("disabled.txt")) => load_disabled(&mut disabled, &text),
+                    _ => {
+                        hashes.load_str(&text);
                     }
-                    "txt" | "csv" => {
-                        hashes.load_str(&String::from_utf8_lossy(&std::fs::read(&file)?));
-                    }
-                    _ => {}
                 }
             }
         }
-        Ok(Engine { hashes, rules: RuleSet::compile(&sources)?, eicar: eicar::eicar_bytes(), disabled, allowed: std::sync::RwLock::new(crate::allowlist::hashes()) })
+        Ok(Engine {
+            hashes,
+            rules: RuleSet::compile(&sources)?,
+            eicar: eicar::eicar_bytes(),
+            disabled,
+            allowed: std::sync::RwLock::new(crate::allowlist::hashes()),
+            fingerprint: fp,
+        })
+    }
+
+    /// Identifies this exact rule set; the scan cache is tied to it.
+    pub fn fingerprint(&self) -> u64 {
+        self.fingerprint
     }
 
     pub fn rule_count(&self) -> usize {
@@ -401,10 +430,24 @@ impl Engine {
                                     *p = head[..n].to_vec();
                                 }
                             }
+                            let cache_key = opts.cache.as_ref().and_then(|_| std::fs::metadata(&path).ok()).map(|m| (crate::cache::ScanCache::key(&path, &m), m.len()));
+                            if let (Some(c), Some((k, len))) = (&opts.cache, cache_key)
+                                && c.contains(k)
+                            {
+                                progress.files.fetch_add(1, Ordering::Relaxed);
+                                progress.cached.fetch_add(1, Ordering::Relaxed);
+                                progress.bytes.fetch_add(len, Ordering::Relaxed);
+                                continue;
+                            }
                             match self.scan_file(&mut scanner, &path, opts.max_size) {
                                 Ok(Some(report)) => {
                                     progress.files.fetch_add(1, Ordering::Relaxed);
                                     progress.bytes.fetch_add(report.size, Ordering::Relaxed);
+                                    if report.detections.is_empty()
+                                        && let (Some(c), Some((k, _))) = (&opts.cache, cache_key)
+                                    {
+                                        c.insert(k);
+                                    }
                                     if !report.detections.is_empty() {
                                         progress.threats.fetch_add(1, Ordering::Relaxed);
                                         local.push(report);
@@ -432,6 +475,9 @@ impl Engine {
             }
         });
 
+        if let Some(c) = &opts.cache {
+            let _ = c.save();
+        }
         threats.sort_by(|a, b| b.top_severity().cmp(&a.top_severity()).then_with(|| a.path.cmp(&b.path)));
         ScanSummary {
             roots,
@@ -441,6 +487,7 @@ impl Engine {
             unreadable: progress.unreadable.load(Ordering::Relaxed),
             elapsed_ms: start.elapsed().as_millis() as u64,
             cancelled: cancel.load(Ordering::Relaxed),
+            cached: progress.cached.load(Ordering::Relaxed),
             threats,
         }
     }
@@ -584,6 +631,27 @@ mod tests {
         let z = crate::container::tests_support::zip(&[("a.txt", b"hello"), ("b/c.json", b"{}")]);
         let mut s = e.rules().scanner();
         assert!(e.scan_bytes(&mut s, Path::new("ok.zip"), &z).1.is_empty());
+    }
+
+    #[test]
+    fn cache_skips_clean_files_but_never_threats() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path();
+        for i in 0..20 {
+            std::fs::write(p.join(format!("f{i}.txt")), format!("clean {i}")).unwrap();
+        }
+        std::fs::write(p.join("marker.bin"), "HEXWARD-HARMLESS-TEST-MARKER-7f3a9c").unwrap();
+        let e = engine();
+        let cache_path = p.join("cache").join("scan.bin");
+        let run = || {
+            let cache = std::sync::Arc::new(crate::cache::ScanCache::open(&cache_path, e.fingerprint()));
+            let opts = ScanOptions { cache: Some(cache), excludes: vec![p.join("cache")], ..Default::default() };
+            e.scan_paths(&[p.to_path_buf()], &opts, &Progress::default(), &AtomicBool::new(false))
+        };
+        let first = run();
+        assert_eq!((first.files_scanned, first.cached, first.threats.len()), (21, 0, 1));
+        let second = run();
+        assert_eq!((second.files_scanned, second.cached, second.threats.len()), (21, 20, 1), "threat re-checked every time");
     }
 
     #[test]

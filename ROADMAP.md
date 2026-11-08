@@ -23,12 +23,15 @@ Built from scratch in Rust; every parser has hard limits (depth, entries, bytes,
 - [x] ZIP (and Office/JAR/APK/MSIX built on it), 7z, GZIP, TAR, ISO 9660; nested up to 3 levels
 - [x] Zip-bomb detection, password-protected archive hiding a program, small disk image hiding a program
 - [x] LNK shortcut analysis per MS-SHLLINK: LOLBin targets, hidden or encoded arguments, oversized payloads
-- [ ] Office macros (OLE/VBA, OOXML), RTF, PDF JavaScript, OneNote attachments
-- [ ] Scripts: HTA, JS, VBS, WSF, PowerShell, with de-obfuscation; SVG and HTML smuggling
+- [x] Office macros (OLE/VBA, OOXML vbaProject.bin) and embedded Ole10Native files
+- [ ] RTF, PDF JavaScript, OneNote attachments
+- [x] Scripts: HTA, JS, VBS, PowerShell, batch, with base64 -enc decoding; SVG and HTML smuggling; ClickFix pages
+- [ ] Deeper script de-obfuscation (string concatenation, char-code arrays, nested encodings)
 - [ ] Installers and packers: MSI, MSIX manifests, NSIS, Inno Setup, UPX, PyInstaller
-- [ ] RAR, CAB, VHD/VHDX, IMG/UDF; `.url` files with WebDAV or `file://` targets
-- [ ] Scan cache keyed by file ID + size + rule version, so repeat scans skip unchanged files
-- [ ] **False-alarm gate in CI:** every rule pack is scanned against a clean corpus first (Windows system
+- [x] `.url` files with WebDAV or `file://` targets
+- [ ] RAR, CAB, VHD/VHDX, IMG/UDF
+- [x] Scan cache keyed by path + size + write time + rule-set fingerprint, so repeat scans skip unchanged files
+- [x] **False-alarm gate in CI** (runner System32 + Program Files with the real rule pack; extend with NSRL sets and winget installers): every rule pack is scanned against a clean corpus first (Windows system
       files, NSRL Modern sets, top winget installers, popular games); any hit on a Microsoft-signed file fails the release
 - [ ] **Signed, staged rule packs:** a separate offline key; canary → 10% → 100% picked locally by each client;
       instant rollback; kill switch; boot-loop breaker
@@ -36,7 +39,8 @@ Built from scratch in Rust; every parser has hard limits (depth, entries, bytes,
 
 ## Phase 2 · Real-time protection, user mode (the gate to every lab test)
 
-- [ ] Background service: ETW process-start and file-write events → scan → stop and quarantine
+- [x] File shield (Downloads, Desktop, Startup folders) and process shield in the app, with auto-quarantine of confirmed threats
+- [ ] Background service so the shields run without the app open; ETW events once running as a service
 - [ ] AMSI provider: scans PowerShell, VBScript, JScript and Office macros as they run (no Microsoft approval needed)
 - [ ] Download watcher and scan-on-Mark-of-the-Web; copy the archive's Mark-of-the-Web onto everything extracted
 - [ ] **Stealer shield:** alert when a non-browser program reads browser passwords and cookies, wallets or Discord/Telegram sessions

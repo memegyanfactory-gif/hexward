@@ -45,7 +45,8 @@ fn sample(ui: &AppWindow) {
     ui.set_home_state(s("safe"));
     ui.set_home_chip(s("ALL CLEAR"));
     ui.set_home_title(s("No threats waiting"));
-    ui.set_home_text(s("Last scan today 09:12: 43,743 files checked, nothing found. Real-time shields arrive in phase 4, so scan regularly until then."));
+    ui.set_home_text(s("Last scan today 09:12: 43,743 files checked, nothing found. The shields check new downloads and every program that starts."));
+    ui.set_shield_info(s("Watches Downloads, Desktop, Startup. New and changed files are checked as soon as they finish writing."));
     ui.set_home_stats(m(vec![
         StatItem { label: s("CHECKED TODAY"), value: s("43,743") },
         StatItem { label: s("FOUND · 30 DAYS"), value: s("2") },
@@ -57,7 +58,8 @@ fn sample(ui: &AppWindow) {
         StatusRow { name: s("Rule pack"), value: s("5,134 rules"), tone: s("safe") },
         StatusRow { name: s("Startup items"), value: s("Checked today 09:20"), tone: s("safe") },
         StatusRow { name: s("Quarantine"), value: s("2 files"), tone: s("off") },
-        StatusRow { name: s("Real-time shields"), value: s("Phase 4"), tone: s("off") },
+        StatusRow { name: s("File shield"), value: s("Watching Downloads, Desktop, Startup"), tone: s("safe") },
+        StatusRow { name: s("Process shield"), value: s("212 programs checked"), tone: s("safe") },
         StatusRow { name: s("App"), value: s("v0.1.0 · up to date"), tone: s("safe") },
     ]));
     let mut daily = std::collections::BTreeMap::new();

@@ -5,6 +5,7 @@
 
 #[allow(dead_code)]
 mod art;
+mod shields;
 mod shots;
 
 use std::cell::RefCell;
@@ -39,11 +40,24 @@ struct Settings {
     close_to_tray: bool,
     pack: String,
     told_about_tray: bool,
+    file_shield: bool,
+    process_shield: bool,
+    auto_quarantine: bool,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { dark: true, max_size_mb: 64, quarantine_suspicious: false, close_to_tray: true, pack: "core".into(), told_about_tray: false }
+        Settings {
+            dark: true,
+            max_size_mb: 64,
+            quarantine_suspicious: false,
+            close_to_tray: true,
+            pack: "core".into(),
+            told_about_tray: false,
+            file_shield: true,
+            process_shield: true,
+            auto_quarantine: true,
+        }
     }
 }
 
@@ -120,6 +134,7 @@ struct State {
     app_install_slot: Slot<Result<PathBuf, String>>,
     next_app_check: Instant,
     window_visible: bool,
+    shields: shields::Shields,
 }
 
 // ---------- helpers ----------
@@ -325,10 +340,15 @@ fn refresh_home(st: &State, ui: &AppWindow) {
             "ALL CLEAR",
             "No threats waiting".to_string(),
             format!(
-                "Last scan {}: {} files checked{}. Real-time shields arrive in phase 4, so scan regularly until then.",
+                "Last scan {}: {} files checked{}. {}",
                 when(last.at),
                 thousands(last.files),
-                if last.threats > 0 { format!(", {} found and handled", last.threats) } else { ", nothing found".into() }
+                if last.threats > 0 { format!(", {} found and handled", last.threats) } else { ", nothing found".into() },
+                if st.settings.file_shield || st.settings.process_shield {
+                    "The shields check new downloads and every program that starts."
+                } else {
+                    "The shields are off, so scan regularly."
+                }
             ),
         )
     } else {
@@ -362,7 +382,20 @@ fn refresh_home(st: &State, ui: &AppWindow) {
             tone: if st.startup_checked_at.is_some() { "safe".into() } else { "off".into() },
         },
         StatusRow { name: "Quarantine".into(), value: format!("{vault_n} {}", if vault_n == 1 { "file" } else { "files" }).into(), tone: "off".into() },
-        StatusRow { name: "Real-time shields".into(), value: "Phase 4".into(), tone: "off".into() },
+        StatusRow {
+            name: "File shield".into(),
+            value: if st.settings.file_shield { format!("Watching {}", shields::describe(&st.shields.watched)).into() } else { "Off".into() },
+            tone: if st.settings.file_shield { "safe".into() } else { "warn".into() },
+        },
+        StatusRow {
+            name: "Process shield".into(),
+            value: if st.settings.process_shield {
+                format!("{} programs checked", thousands(st.shields.stats.programs_checked.load(Ordering::Relaxed))).into()
+            } else {
+                "Off".into()
+            },
+            tone: if st.settings.process_shield { "safe".into() } else { "warn".into() },
+        },
         StatusRow {
             name: "App".into(),
             value: match &st.release {
@@ -417,6 +450,10 @@ fn refresh_settings(st: &State, ui: &AppWindow) {
     ui.set_max_size_mb(st.settings.max_size_mb as i32);
     ui.set_quarantine_suspicious(st.settings.quarantine_suspicious);
     ui.set_close_to_tray(st.settings.close_to_tray);
+    ui.set_file_shield(st.settings.file_shield);
+    ui.set_process_shield(st.settings.process_shield);
+    ui.set_auto_quarantine(st.settings.auto_quarantine);
+    ui.set_shield_info(format!("Watches {}. New and changed files are checked as soon as they finish writing.", shields::describe(&st.shields.watched)).into());
     ui.set_pack(st.settings.pack.clone().into());
     let allow: Vec<AllowRow> = allowlist::list()
         .into_iter()
@@ -474,6 +511,7 @@ fn start_scan(st: &mut State, ui: &AppWindow, kind: &'static str) {
         threads: 0,
         // Never scan Hexward's own data: the rule files would match the rules.
         excludes: vec![data_dir(), Vault::default_dir()],
+        cache: Some(Arc::new(hexward_engine::cache::ScanCache::open(hexward_engine::cache::ScanCache::default_path(), engine.fingerprint()))),
     };
     {
         let (progress, cancel, result) = (progress.clone(), cancel.clone(), result.clone());
@@ -665,10 +703,11 @@ fn finish_scan(st: &mut State, ui: &AppWindow, s: ScanSummary) {
     let skipped = s.skipped_large + s.unreadable;
     ui.set_scan_text(
         format!(
-            "{} files ({}) checked in {}.{}",
+            "{} files ({}) checked in {}{}.{}",
             thousands(s.files_scanned),
             bytes(s.bytes_scanned),
             clock(elapsed),
+            if s.cached > 0 { format!(", {} unchanged since a clean scan", thousands(s.cached)) } else { String::new() },
             if skipped > 0 { format!(" {} skipped (too large, in use or no permission).", thousands(skipped)) } else { String::new() }
         )
         .into(),
@@ -789,6 +828,29 @@ fn allow_row(st: &mut State, ui: &AppWindow, i: usize) {
     }
     update_results_header(st, ui);
     refresh_home(st, ui);
+}
+
+fn shield_hit(st: &mut State, ui: &AppWindow, ev: shields::ShieldEvent) {
+    let r = &ev.report;
+    let mut row = row_for(r, !ev.quarantined && r.is_confirmed());
+    row.description = format!("{}: {} {}", ev.shield, ev.action, row.description).into();
+    if ev.quarantined {
+        row.done = true;
+        row.selected = false;
+        row.chip = "QUARANTINED".into();
+        row.tone = "safe".into();
+    }
+    st.reports.push(r.clone());
+    st.threats.push(row);
+    let mut e = Event::new(EventKind::Scan, ev.shield, format!("{} · {} · {}", r.detections[0].name, r.path.display(), ev.action));
+    e.files = 1;
+    e.threats = 1;
+    history::append(e);
+    update_results_header(st, ui);
+    refresh_vault(st, ui);
+    refresh_home(st, ui);
+    let name = r.path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    toast(st, ui, if ev.quarantined { "safe" } else { "alarm" }, &format!("{} found {}", ev.shield, r.detections[0].name), &format!("{name}: {}", ev.action));
 }
 
 // ---------- quarantine ----------
@@ -975,6 +1037,7 @@ fn tick(st: &mut State, ui: &AppWindow) {
                 let n = engine.rule_count() as u64;
                 ui.set_rules_count(thousands(n).into());
                 ui.set_engine_status(format!("{} rules ready", thousands(n)).into());
+                st.shields.set_engine(engine.clone());
                 st.engine = Some(engine);
                 ui.set_engine_ready(true);
                 if st.reloading {
@@ -990,6 +1053,9 @@ fn tick(st: &mut State, ui: &AppWindow) {
         refresh_home(st, ui);
     }
     tick_scan(st, ui);
+    for ev in st.shields.drain() {
+        shield_hit(st, ui, ev);
+    }
     if let Some(rows) = take(&st.startup_slot) {
         st.startup_items = rows;
         st.startup_checked_at = Some(Utc::now());
@@ -1111,6 +1177,7 @@ fn main() -> Result<(), slint::PlatformError> {
     ui.set_version(env!("CARGO_PKG_VERSION").into());
 
     let settings = Settings::load();
+    let settings_shields = (settings.file_shield, settings.process_shield, settings.auto_quarantine);
     ui.global::<Theme>().set_dark(settings.dark);
     let threats = Rc::new(VecModel::<ThreatRow>::default());
     ui.set_threats(ModelRc::from(threats.clone()));
@@ -1144,6 +1211,7 @@ fn main() -> Result<(), slint::PlatformError> {
         app_install_slot: slot(),
         next_app_check: Instant::now() + Duration::from_secs(6 * 3600),
         window_visible: true,
+        shields: shields::Shields::start(settings_shields.0, settings_shields.1, settings_shields.2),
     }));
     {
         let mut s = st.borrow_mut();
@@ -1354,6 +1422,27 @@ fn main() -> Result<(), slint::PlatformError> {
         s.settings.quarantine_suspicious = v;
         s.settings.save();
         u.set_quarantine_suspicious(v);
+    });
+    on!(on_set_file_shield, |s, u, v: bool| {
+        s.settings.file_shield = v;
+        s.settings.save();
+        s.shields.file_on.store(v, Ordering::Relaxed);
+        u.set_file_shield(v);
+        refresh_home(s, &u);
+        toast(s, &u, if v { "safe" } else { "warn" }, if v { "File shield on" } else { "File shield off" }, if v { "New downloads are checked as they arrive." } else { "New downloads won't be checked until you turn it back on." });
+    });
+    on!(on_set_process_shield, |s, u, v: bool| {
+        s.settings.process_shield = v;
+        s.settings.save();
+        s.shields.process_on.store(v, Ordering::Relaxed);
+        u.set_process_shield(v);
+        refresh_home(s, &u);
+    });
+    on!(on_set_auto_quarantine, |s, u, v: bool| {
+        s.settings.auto_quarantine = v;
+        s.settings.save();
+        s.shields.auto_quarantine.store(v, Ordering::Relaxed);
+        u.set_auto_quarantine(v);
     });
     on!(on_set_close_to_tray, |s, u, v: bool| {
         s.settings.close_to_tray = v;

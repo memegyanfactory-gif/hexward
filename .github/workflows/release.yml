@@ -51,6 +51,34 @@ jobs:
       - name: Lint
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
+      # Every release must stay silent on clean software: Windows itself plus everything
+      # installed on the runner (SDKs, compilers, browsers). One confirmed hit blocks the release.
+      - name: False-alarm gate
+        shell: pwsh
+        run: |
+          cargo build --release --locked -p hexward
+          ./target/release/hexward.exe update
+          ./target/release/hexward.exe scan C:\Windows\System32 "C:\Program Files" --json --no-cache > fp.json
+          $j = Get-Content fp.json -Raw | ConvertFrom-Json
+          $s = $j.summary
+          $confirmed = @($s.threats | Where-Object { @($_.detections | Where-Object { $_.source -in @('hash', 'rule', 'eicar') }).Count -gt 0 })
+          $suspicious = @($s.threats).Count - $confirmed.Count
+          $report = @(
+            "## False-alarm gate",
+            "",
+            "| Files checked | Data | Confirmed hits | Suspicious |",
+            "|---|---|---|---|",
+            "| $($s.files_scanned) | $([math]::Round($s.bytes_scanned / 1GB, 1)) GB | $($confirmed.Count) | $suspicious |",
+            ""
+          )
+          foreach ($t in @($s.threats)) { $report += "- ``$($t.detections[0].name)`` · $($t.path) $(if ($t.detections[0].inner) { '› ' + $t.detections[0].inner })" }
+          $report -join "`n" | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY
+          if ($confirmed.Count -gt 0) {
+            Write-Host "::error::$($confirmed.Count) confirmed detections on clean software. Fix the rule or add it to rules/disabled.txt."
+            exit 1
+          }
+          exit 0
+
       - name: Build
         if: steps.v.outputs.exists == 'false'
         run: cargo build --release --locked -p hexward-app -p hexward -p hexward-release
